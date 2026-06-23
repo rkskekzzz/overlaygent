@@ -76,7 +76,7 @@ final class AgentProfileListViewModelTests: XCTestCase {
         XCTAssertEqual(try stores.orchestratorStore.loadSettings().maximumSelectedAgents, 3)
     }
 
-    func testMovingProfilesUpdatesPublishedAndPersistedOrder() throws {
+    func testDragReorderingProfilesUpdatesPublishedAndPersistedOrder() throws {
         let stores = try makeStores()
         let viewModel = AgentProfileListViewModel(
             store: stores.agentStore,
@@ -86,16 +86,12 @@ final class AgentProfileListViewModelTests: XCTestCase {
         let grammarID = viewModel.profiles[0].id
         let naturalID = viewModel.profiles[1].id
 
-        XCTAssertFalse(viewModel.canMoveProfileUp(id: grammarID))
-        XCTAssertTrue(viewModel.canMoveProfileDown(id: grammarID))
-
-        viewModel.moveProfileDown(id: grammarID)
+        viewModel.moveProfile(id: grammarID, over: naturalID)
 
         XCTAssertEqual(Array(viewModel.profiles.map(\.id).prefix(2)), [naturalID, grammarID])
         XCTAssertEqual(try stores.agentStore.loadProfiles().map(\.id), viewModel.profiles.map(\.id))
-        XCTAssertTrue(viewModel.canMoveProfileUp(id: grammarID))
 
-        viewModel.moveProfileUp(id: grammarID)
+        viewModel.moveProfile(id: grammarID, over: naturalID)
 
         XCTAssertEqual(Array(viewModel.profiles.map(\.id).prefix(2)), [grammarID, naturalID])
         XCTAssertEqual(try stores.agentStore.loadProfiles().map(\.id), viewModel.profiles.map(\.id))

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum AgentSettingsSelection: Hashable {
     case orchestrator
@@ -92,28 +93,22 @@ final class AgentProfileListViewModel: ObservableObject {
         persistProfiles()
     }
 
-    func canMoveProfileUp(id: AgentProfile.ID) -> Bool {
-        guard let index = profiles.firstIndex(where: { $0.id == id }) else {
-            return false
+    func moveProfile(id draggedID: AgentProfile.ID, over targetID: AgentProfile.ID) {
+        guard
+            draggedID != targetID,
+            let sourceIndex = profiles.firstIndex(where: { $0.id == draggedID }),
+            let targetIndex = profiles.firstIndex(where: { $0.id == targetID })
+        else {
+            return
         }
 
-        return index > profiles.startIndex
-    }
-
-    func canMoveProfileDown(id: AgentProfile.ID) -> Bool {
-        guard let index = profiles.firstIndex(where: { $0.id == id }) else {
-            return false
-        }
-
-        return index < profiles.index(before: profiles.endIndex)
-    }
-
-    func moveProfileUp(id: AgentProfile.ID) {
-        moveProfile(id: id, offset: -1)
-    }
-
-    func moveProfileDown(id: AgentProfile.ID) {
-        moveProfile(id: id, offset: 1)
+        var reorderedProfiles = profiles
+        reorderedProfiles.move(
+            fromOffsets: IndexSet(integer: sourceIndex),
+            toOffset: targetIndex > sourceIndex ? targetIndex + 1 : targetIndex
+        )
+        profiles = reorderedProfiles
+        persistProfiles()
     }
 
     func updateProfile(_ profile: AgentProfile) {
@@ -191,20 +186,6 @@ final class AgentProfileListViewModel: ObservableObject {
         }
     }
 
-    private func moveProfile(id: AgentProfile.ID, offset: Int) {
-        guard let sourceIndex = profiles.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-
-        let destinationIndex = sourceIndex + offset
-        guard profiles.indices.contains(destinationIndex) else {
-            return
-        }
-
-        profiles.swapAt(sourceIndex, destinationIndex)
-        persistProfiles()
-    }
-
     private func persistOrchestratorSettings() {
         do {
             try orchestratorSettingsStore.saveSettings(orchestratorSettings)
@@ -218,6 +199,7 @@ final class AgentProfileListViewModel: ObservableObject {
 struct AgentListView: View {
     @StateObject private var viewModel: AgentProfileListViewModel
     @State private var path: [AgentSettingsSelection] = []
+    @State private var draggedProfileID: AgentProfile.ID?
 
     @MainActor
     init() {
@@ -317,14 +299,19 @@ struct AgentListView: View {
                                 AgentProfileNavigationRow(
                                     profile: profile,
                                     statusText: profileStatusText(for: profile),
-                                    canMoveUp: viewModel.canMoveProfileUp(id: profile.id),
-                                    canMoveDown: viewModel.canMoveProfileDown(id: profile.id),
-                                    moveUp: {
-                                        viewModel.moveProfileUp(id: profile.id)
-                                    },
-                                    moveDown: {
-                                        viewModel.moveProfileDown(id: profile.id)
-                                    }
+                                    isDragging: draggedProfileID == profile.id
+                                )
+                                .onDrag {
+                                    draggedProfileID = profile.id
+                                    return NSItemProvider(object: profile.id.uuidString as NSString)
+                                }
+                                .onDrop(
+                                    of: [.text],
+                                    delegate: AgentProfileDropDelegate(
+                                        targetID: profile.id,
+                                        draggedProfileID: $draggedProfileID,
+                                        viewModel: viewModel
+                                    )
                                 )
                             }
                         }
@@ -376,13 +363,17 @@ struct AgentListView: View {
 private struct AgentProfileNavigationRow: View {
     let profile: AgentProfile
     let statusText: String
-    let canMoveUp: Bool
-    let canMoveDown: Bool
-    let moveUp: () -> Void
-    let moveDown: () -> Void
+    let isDragging: Bool
 
     var body: some View {
         HStack(spacing: 0) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 38, height: 54)
+                .padding(.leading, 10)
+                .help("Drag to reorder agent")
+
             NavigationLink(value: AgentSettingsSelection.agent(profile.id)) {
                 SettingsNavigationRow(
                     systemImageName: profile.isEnabled
@@ -396,58 +387,33 @@ private struct AgentProfileNavigationRow: View {
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            AgentReorderControls(
-                canMoveUp: canMoveUp,
-                canMoveDown: canMoveDown,
-                moveUp: moveUp,
-                moveDown: moveDown
-            )
-            .padding(.trailing, 12)
         }
+        .opacity(isDragging ? 0.45 : 1)
     }
 }
 
-private struct AgentReorderControls: View {
-    let canMoveUp: Bool
-    let canMoveDown: Bool
-    let moveUp: () -> Void
-    let moveDown: () -> Void
+private struct AgentProfileDropDelegate: DropDelegate {
+    let targetID: AgentProfile.ID
+    @Binding var draggedProfileID: AgentProfile.ID?
+    let viewModel: AgentProfileListViewModel
 
-    var body: some View {
-        VStack(spacing: 4) {
-            reorderButton(
-                systemImageName: "chevron.up",
-                helpText: "Move agent up",
-                isEnabled: canMoveUp,
-                action: moveUp
-            )
-
-            reorderButton(
-                systemImageName: "chevron.down",
-                helpText: "Move agent down",
-                isEnabled: canMoveDown,
-                action: moveDown
-            )
+    func dropEntered(info: DropInfo) {
+        guard let draggedProfileID else {
+            return
         }
-        .frame(width: 28)
+
+        withAnimation(.easeInOut(duration: 0.12)) {
+            viewModel.moveProfile(id: draggedProfileID, over: targetID)
+        }
     }
 
-    private func reorderButton(
-        systemImageName: String,
-        helpText: String,
-        isEnabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImageName)
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 20, height: 16)
-        }
-        .buttonStyle(.borderless)
-        .disabled(isEnabled == false)
-        .foregroundStyle(isEnabled ? Color.secondary : Color.secondary.opacity(0.35))
-        .help(helpText)
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedProfileID = nil
+        return true
     }
 }
 
