@@ -101,6 +101,54 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         XCTAssertEqual(capturedPayload.model, "fallback-model")
     }
 
+    func testCompleteIncludesReasoningEffortWhenConfigured() async throws {
+        let httpClient = MockLLMProviderHTTPClient(
+            result: .success((
+                responseData(content: "Reasoning response"),
+                httpResponse(statusCode: 200)
+            ))
+        )
+        let provider = OpenAICompatibleProvider(httpClient: httpClient)
+        let config = providerConfig(reasoningEffort: .high)
+
+        _ = try await provider.complete(
+            bundle: messageBundle(),
+            provider: config,
+            apiKey: "sk-test-secret"
+        )
+
+        let request = try XCTUnwrap(httpClient.capturedRequests.first)
+        let body = try XCTUnwrap(request.httpBody)
+        let capturedPayload = try JSONDecoder().decode(CapturedChatCompletionRequest.self, from: body)
+        XCTAssertEqual(capturedPayload.reasoningEffort, "high")
+    }
+
+    func testListModelsBuildsOpenAICompatibleRequestAndReturnsSortedModelIDs() async throws {
+        let apiKey = "sk-test-secret"
+        let httpClient = MockLLMProviderHTTPClient(
+            result: .success((
+                Data(#"{"data":[{"id":"gpt-5.2"},{"id":"gpt-4.1-mini"},{"id":"gpt-5.2"},{"id":"  "} ]}"#.utf8),
+                httpResponse(statusCode: 200, url: URL(string: "https://api.example.com/v1/models")!)
+            ))
+        )
+        let modelLister = OpenAICompatibleModelLister(httpClient: httpClient)
+        let config = providerConfig(
+            baseURL: URL(string: "https://api.example.com/v1/")!,
+            timeoutSeconds: 8
+        )
+
+        let models = try await modelLister.listModels(provider: config, apiKey: apiKey)
+
+        XCTAssertEqual(models, ["gpt-4.1-mini", "gpt-5.2"])
+        let request = try XCTUnwrap(httpClient.capturedRequests.first)
+        XCTAssertEqual(request.url?.absoluteString, "https://api.example.com/v1/models")
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.timeoutInterval, 8)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(apiKey)")
+        XCTAssertNil(request.httpBody)
+    }
+
     func testCompleteNormalizesNestedBaseEndpoint() async throws {
         let httpClient = MockLLMProviderHTTPClient(
             result: .success((
@@ -330,6 +378,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
     private func providerConfig(
         baseURL: URL = URL(string: "https://api.example.com/v1")!,
         defaultModel: String = "gpt-4.1-mini",
+        reasoningEffort: ReasoningEffort? = nil,
         temperature: Double = 0.2,
         maxTokens: Int = 1_200,
         timeoutSeconds: Double = 30
@@ -339,6 +388,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
             name: "OpenAI Compatible",
             baseURL: baseURL,
             defaultModel: defaultModel,
+            reasoningEffort: reasoningEffort,
             temperature: temperature,
             maxTokens: maxTokens,
             timeoutSeconds: timeoutSeconds,
@@ -350,9 +400,12 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         Data(#"{"choices":[{"message":{"content":"\#(content)"}}]}"#.utf8)
     }
 
-    private func httpResponse(statusCode: Int) -> HTTPURLResponse {
+    private func httpResponse(
+        statusCode: Int,
+        url: URL = URL(string: "https://api.example.com/v1/chat/completions")!
+    ) -> HTTPURLResponse {
         HTTPURLResponse(
-            url: URL(string: "https://api.example.com/v1/chat/completions")!,
+            url: url,
             statusCode: statusCode,
             httpVersion: nil,
             headerFields: nil
@@ -383,6 +436,7 @@ private struct CapturedChatCompletionRequest: Decodable {
     var model: String
     var messages: [Message]
     var temperature: Double
+    var reasoningEffort: String?
     var maxCompletionTokens: Int
     var responseFormat: ResponseFormat
 
@@ -411,6 +465,7 @@ private struct CapturedChatCompletionRequest: Decodable {
         case model
         case messages
         case temperature
+        case reasoningEffort = "reasoning_effort"
         case maxCompletionTokens = "max_completion_tokens"
         case responseFormat = "response_format"
     }

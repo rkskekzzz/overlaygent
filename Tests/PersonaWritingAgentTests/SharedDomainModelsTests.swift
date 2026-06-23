@@ -9,6 +9,7 @@ final class SharedDomainModelsTests: XCTestCase {
             name: "OpenAI Compatible",
             baseURL: URL(string: "https://api.example.com/v1")!,
             defaultModel: "gpt-4.1-mini",
+            reasoningEffort: .low,
             temperature: 0.2,
             maxTokens: 1_200,
             timeoutSeconds: 30,
@@ -16,6 +17,27 @@ final class SharedDomainModelsTests: XCTestCase {
         )
 
         XCTAssertEqual(try roundTrip(provider), provider)
+    }
+
+    func testLLMProviderConfigDecodesLegacyProviderWithoutReasoningEffort() throws {
+        let data = Data(
+            """
+            {
+              "id": "00000000-0000-0000-0000-000000000001",
+              "name": "OpenAI Compatible",
+              "baseURL": "https://api.example.com/v1",
+              "defaultModel": "gpt-4.1-mini",
+              "temperature": 0.2,
+              "maxTokens": 1200,
+              "timeoutSeconds": 30,
+              "keychainServiceName": "PersonaWritingAgent.OpenAI"
+            }
+            """.utf8
+        )
+
+        let provider = try JSONDecoder().decode(LLMProviderConfig.self, from: data)
+
+        XCTAssertNil(provider.reasoningEffort)
     }
 
     func testAgentRunRequestCodableRoundTrip() throws {

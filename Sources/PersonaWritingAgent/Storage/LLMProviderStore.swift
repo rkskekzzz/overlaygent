@@ -43,6 +43,7 @@ extension LLMProviderConfig {
         name: String = "OpenAI Compatible",
         baseURL: URL = URL(string: "https://api.openai.com/v1")!,
         defaultModel: String = "gpt-4.1-mini",
+        reasoningEffort: ReasoningEffort? = nil,
         temperature: Double = 0.2,
         maxTokens: Int = 1_200,
         timeoutSeconds: Double = 30
@@ -52,6 +53,7 @@ extension LLMProviderConfig {
             name: name,
             baseURL: baseURL,
             defaultModel: defaultModel,
+            reasoningEffort: reasoningEffort,
             temperature: temperature,
             maxTokens: maxTokens,
             timeoutSeconds: timeoutSeconds,

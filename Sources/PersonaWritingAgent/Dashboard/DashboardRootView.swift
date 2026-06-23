@@ -13,20 +13,22 @@ struct DashboardRootView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             List(DashboardSection.allCases, selection: $selection) { section in
                 Label(section.title, systemImage: section.systemImageName)
                     .tag(section)
             }
-            .navigationTitle("Dashboard")
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
-        } detail: {
+            .listStyle(.sidebar)
+            .frame(width: 220)
+
+            Divider()
+
             DashboardSectionDetailView(
                 section: selection ?? .general,
                 dependencies: dependencies
             )
         }
-        .frame(minWidth: 820, minHeight: 540)
+        .frame(minWidth: 720, minHeight: 500)
     }
 }
 
@@ -45,7 +47,11 @@ private struct DashboardSectionDetailView: View {
                 apiKeyStore: dependencies.apiKeyStore
             )
         case .agents:
-            AgentListView(store: dependencies.agentProfileStore)
+            AgentListView(
+                store: dependencies.agentProfileStore,
+                providerStore: dependencies.llmProviderStore,
+                orchestratorSettingsStore: dependencies.orchestratorSettingsStore
+            )
         case .privacy:
             PrivacyView()
         case .diagnostics:

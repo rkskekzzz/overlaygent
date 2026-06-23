@@ -88,6 +88,7 @@ struct OpenAICompatibleProvider: LLMProvider {
                 )
             },
             temperature: provider.temperature,
+            reasoningEffort: provider.reasoningEffort,
             maxCompletionTokens: provider.maxTokens,
             responseFormat: .correctionResult
         )
@@ -172,6 +173,7 @@ private struct OpenAIChatCompletionRequest: Encodable {
     var model: String
     var messages: [Message]
     var temperature: Double
+    var reasoningEffort: ReasoningEffort?
     var maxCompletionTokens: Int
     var responseFormat: OpenAIResponseFormat
 
@@ -179,6 +181,7 @@ private struct OpenAIChatCompletionRequest: Encodable {
         case model
         case messages
         case temperature
+        case reasoningEffort = "reasoning_effort"
         case maxCompletionTokens = "max_completion_tokens"
         case responseFormat = "response_format"
     }

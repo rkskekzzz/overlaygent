@@ -92,12 +92,51 @@ final class ProviderSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.apiKeyDraft, "")
     }
 
+    func testRefreshingSelectedProviderModelsUsesStoredAPIKeyAndCachesModelIDs() async {
+        let apiKeyStore = InMemoryProviderAPIKeyStore()
+        let modelLister = MockProviderModelLister(result: .success(["gpt-4.1-mini", "gpt-5.2"]))
+        let provider = provider(idSuffix: "501")
+        apiKeyStore.apiKeysByServiceName[provider.keychainServiceName] = "  sk-existing-secret  "
+        let viewModel = makeViewModel(apiKeyStore: apiKeyStore, modelLister: modelLister)
+        viewModel.providers = [provider]
+        viewModel.selectedProviderID = provider.id
+        viewModel.hasUnsavedChanges = false
+
+        await viewModel.refreshSelectedProviderModels()
+
+        XCTAssertEqual(viewModel.availableModelIDs(for: provider.id), ["gpt-4.1-mini", "gpt-5.2"])
+        XCTAssertEqual(modelLister.capturedProviders, [provider])
+        XCTAssertEqual(modelLister.capturedAPIKeys, ["sk-existing-secret"])
+        XCTAssertEqual(viewModel.statusMessage, "Loaded 2 models.")
+        XCTAssertFalse(viewModel.hasError)
+        XCTAssertFalse(viewModel.isLoadingModelList)
+        XCTAssertFalse(viewModel.hasUnsavedChanges)
+    }
+
+    func testRefreshingSelectedProviderModelsRequiresStoredAPIKey() async {
+        let modelLister = MockProviderModelLister(result: .success(["gpt-5.2"]))
+        let provider = provider(idSuffix: "601")
+        let viewModel = makeViewModel(modelLister: modelLister)
+        viewModel.providers = [provider]
+        viewModel.selectedProviderID = provider.id
+
+        await viewModel.refreshSelectedProviderModels()
+
+        XCTAssertEqual(modelLister.capturedProviders, [])
+        XCTAssertEqual(viewModel.availableModelIDs(for: provider.id), [])
+        XCTAssertEqual(viewModel.statusMessage, "Save an API key before refreshing models.")
+        XCTAssertTrue(viewModel.hasError)
+        XCTAssertFalse(viewModel.isLoadingModelList)
+    }
+
     private func makeViewModel(
-        apiKeyStore: InMemoryProviderAPIKeyStore = InMemoryProviderAPIKeyStore()
+        apiKeyStore: InMemoryProviderAPIKeyStore = InMemoryProviderAPIKeyStore(),
+        modelLister: any LLMProviderModelListing = MockProviderModelLister(result: .success([]))
     ) -> ProviderSettingsViewModel {
         ProviderSettingsViewModel(
             store: LLMProviderStore(fileURL: temporaryDirectory.appendingPathComponent("providers.json")),
-            apiKeyStore: apiKeyStore
+            apiKeyStore: apiKeyStore,
+            modelLister: modelLister
         )
     }
 
@@ -129,5 +168,24 @@ private final class InMemoryProviderAPIKeyStore: LLMProviderAPIKeyStoring {
     func deleteAPIKey(for provider: LLMProviderConfig) throws {
         deletedServiceNames.append(provider.keychainServiceName)
         apiKeysByServiceName.removeValue(forKey: provider.keychainServiceName)
+    }
+}
+
+private final class MockProviderModelLister: LLMProviderModelListing {
+    private let result: Result<[String], Error>
+    private(set) var capturedProviders: [LLMProviderConfig] = []
+    private(set) var capturedAPIKeys: [String?] = []
+
+    init(result: Result<[String], Error>) {
+        self.result = result
+    }
+
+    func listModels(
+        provider: LLMProviderConfig,
+        apiKey: String?
+    ) async throws -> [String] {
+        capturedProviders.append(provider)
+        capturedAPIKeys.append(apiKey)
+        return try result.get()
     }
 }

@@ -5,10 +5,41 @@ struct LLMProviderConfig: Codable, Identifiable, Equatable {
     var name: String
     var baseURL: URL
     var defaultModel: String
+    var reasoningEffort: ReasoningEffort? = nil
     var temperature: Double
     var maxTokens: Int
     var timeoutSeconds: Double
     var keychainServiceName: String
+}
+
+enum ReasoningEffort: String, Codable, Equatable, CaseIterable, Identifiable {
+    case none
+    case minimal
+    case low
+    case medium
+    case high
+    case xhigh
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .none:
+            return "None"
+        case .minimal:
+            return "Minimal"
+        case .low:
+            return "Low"
+        case .medium:
+            return "Medium"
+        case .high:
+            return "High"
+        case .xhigh:
+            return "XHigh"
+        }
+    }
 }
 
 struct AgentProfile: Codable, Identifiable, Equatable {
