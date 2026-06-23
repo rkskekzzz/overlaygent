@@ -3,27 +3,27 @@
 import PackageDescription
 
 let package = Package(
-    name: "PersonaWritingAgent",
+    name: "Overlaygent",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         .executable(
-            name: "PersonaWritingAgent",
-            targets: ["PersonaWritingAgent"]
+            name: "Overlaygent",
+            targets: ["Overlaygent"]
         )
     ],
     targets: [
         .executableTarget(
-            name: "PersonaWritingAgent",
+            name: "Overlaygent",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedLibrary("sqlite3")
             ]
         ),
         .testTarget(
-            name: "PersonaWritingAgentTests",
-            dependencies: ["PersonaWritingAgent"]
+            name: "OverlaygentTests",
+            dependencies: ["Overlaygent"]
         )
     ]
 )

@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$("$ROOT_DIR/scripts/build-dev-app.sh" | tail -n 1)"
-APP_EXEC="$APP_DIR/Contents/MacOS/PersonaWritingAgent"
+APP_EXEC="$APP_DIR/Contents/MacOS/Overlaygent"
 
-launchctl remove PersonaWritingAgentDev 2>/dev/null || true
-pkill -x PersonaWritingAgent 2>/dev/null || true
+launchctl remove OverlaygentDev 2>/dev/null || true
+pkill -x Overlaygent 2>/dev/null || true
 
 open -n "$APP_DIR"
 
@@ -20,7 +20,7 @@ for _ in {1..20}; do
 done
 
 if [[ -z "$APP_PID" ]]; then
-  echo "PersonaWritingAgent failed to stay running after launch." >&2
+  echo "Overlaygent failed to stay running after launch." >&2
   exit 1
 fi
 

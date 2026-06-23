@@ -1,6 +1,6 @@
-# Persona Writing Agent
+# Overlaygent
 
-Minimal Swift/AppKit scaffold for the Persona Writing Agent macOS menu bar app.
+Minimal Swift/AppKit scaffold for the Overlaygent macOS menu bar app.
 
 ## Build
 
@@ -11,7 +11,7 @@ swift build
 ## Run
 
 ```sh
-swift run PersonaWritingAgent
+swift run Overlaygent
 ```
 
 ## MVP Smoke

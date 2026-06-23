@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="PersonaWritingAgent"
-BUNDLE_ID="${PERSONA_BUNDLE_ID:-com.polar.PersonaWritingAgentDev}"
+APP_NAME="Overlaygent"
+BUNDLE_ID="${OVERLAYGENT_BUNDLE_ID:-com.polar.OverlaygentDev}"
 BUILD_DIR="$ROOT_DIR/.build/dev-app"
 APP_DIR="$BUILD_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
@@ -51,7 +51,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 </plist>
 PLIST
 
-IDENTITY="${PERSONA_CODESIGN_IDENTITY:-}"
+IDENTITY="${OVERLAYGENT_CODESIGN_IDENTITY:-}"
 if [[ -n "$IDENTITY" ]]; then
   codesign --force --deep --options runtime --sign "$IDENTITY" "$APP_DIR"
   codesign --verify --deep --strict "$APP_DIR"
@@ -59,7 +59,7 @@ else
   if [[ -d "$APP_DIR/Contents/_CodeSignature" ]]; then
     rm -rf "$APP_DIR/Contents/_CodeSignature"
   fi
-  echo "warning: skipping codesign for local dev app; set PERSONA_CODESIGN_IDENTITY to sign explicitly." >&2
+  echo "warning: skipping codesign for local dev app; set OVERLAYGENT_CODESIGN_IDENTITY to sign explicitly." >&2
 fi
 
 echo "$APP_DIR"
