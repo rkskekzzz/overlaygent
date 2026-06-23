@@ -96,6 +96,34 @@ final class EditApplierTests: XCTestCase {
         )
     }
 
+    func testAXSelectedTextApplierRestoresFocusBeforeWritingSelection() throws {
+        let element = AXElement(FakeAXNode())
+        let recorder = ClipboardCallRecorder()
+        let writer = FakeAXSelectedTextWriter(recorder: recorder)
+        let focusRestorer = FakeAXTextFocusRestorer(recorder: recorder, processID: 42)
+        let applier = AXSelectedTextApplier(
+            element: element,
+            writer: writer,
+            valueReader: FakeAXTextValueReader(value: "I will deploy it when PR approved."),
+            focusRestorer: focusRestorer,
+            focusSettleDelay: 0
+        )
+
+        _ = try applier.apply(
+            correctionEdit(range: 7..<18, original: "make deploy", replacement: "deploy it"),
+            to: textSnapshot("I will make deploy when PR approved.")
+        )
+
+        XCTAssertEqual(
+            recorder.calls,
+            [
+                .restoreFocus(element),
+                .setSelectedRange(AXTextRange(location: 7, length: 11), element),
+                .replaceSelectedText("deploy it", element)
+            ]
+        )
+    }
+
     func testAXSelectedTextApplierFailsWhenWriteDoesNotChangeValue() {
         let element = AXElement(FakeAXNode())
         let writer = FakeAXSelectedTextWriter()
@@ -168,6 +196,33 @@ final class EditApplierTests: XCTestCase {
         )
     }
 
+    func testAXValueApplierRestoresFocusBeforeWritingValue() throws {
+        let element = AXElement(FakeAXNode())
+        let recorder = ClipboardCallRecorder()
+        let writer = FakeAXValueWriter(recorder: recorder)
+        let focusRestorer = FakeAXTextFocusRestorer(recorder: recorder, processID: 42)
+        let applier = AXValueApplier(
+            element: element,
+            writer: writer,
+            valueReader: FakeAXTextValueReader(value: "Ship when review passes."),
+            focusRestorer: focusRestorer,
+            focusSettleDelay: 0
+        )
+
+        _ = try applier.apply(
+            correctionEdit(range: 10..<21, original: "PR approved", replacement: "review passes"),
+            to: textSnapshot("Ship when PR approved.")
+        )
+
+        XCTAssertEqual(
+            recorder.calls,
+            [
+                .restoreFocus(element),
+                .setValue("Ship when review passes.", element)
+            ]
+        )
+    }
+
     func testAXClipboardPasteApplierSelectsRangeThenPastesReplacementAndRestoresClipboard() throws {
         let element = AXElement(FakeAXNode())
         let selectionWriter = FakeAXSelectedTextWriter()
@@ -199,9 +254,9 @@ final class EditApplierTests: XCTestCase {
         XCTAssertEqual(
             recorder.calls,
             [
+                .restoreFocus(element),
                 .snapshot,
                 .setString("deploy it"),
-                .restoreFocus(element),
                 .sendPasteEvent(processID: 42),
                 .restore(ClipboardSnapshot(string: "previous clipboard"))
             ]
@@ -347,14 +402,21 @@ private final class FakeAXSelectedTextWriter: AXSelectedTextWriting {
         case replaceSelectedText(String, AXElement)
     }
 
+    private let recorder: ClipboardCallRecorder?
     private(set) var calls: [Call] = []
+
+    init(recorder: ClipboardCallRecorder? = nil) {
+        self.recorder = recorder
+    }
 
     func setSelectedTextRange(_ range: AXTextRange, on element: AXElement) throws {
         calls.append(.setSelectedRange(range, element))
+        recorder?.calls.append(.setSelectedRange(range, element))
     }
 
     func replaceSelectedText(with replacement: String, on element: AXElement) throws {
         calls.append(.replaceSelectedText(replacement, element))
+        recorder?.calls.append(.replaceSelectedText(replacement, element))
     }
 }
 
@@ -363,10 +425,16 @@ private final class FakeAXValueWriter: AXValueWriting {
         case setValue(String, AXElement)
     }
 
+    private let recorder: ClipboardCallRecorder?
     private(set) var calls: [Call] = []
+
+    init(recorder: ClipboardCallRecorder? = nil) {
+        self.recorder = recorder
+    }
 
     func setValue(_ value: String, on element: AXElement) throws {
         calls.append(.setValue(value, element))
+        recorder?.calls.append(.setValue(value, element))
     }
 }
 
@@ -382,6 +450,9 @@ private final class ClipboardCallRecorder {
     enum Call: Equatable {
         case snapshot
         case setString(String)
+        case setSelectedRange(AXTextRange, AXElement)
+        case replaceSelectedText(String, AXElement)
+        case setValue(String, AXElement)
         case restoreFocus(AXElement)
         case sendPasteEvent(processID: pid_t?)
         case restore(ClipboardSnapshot)

@@ -52,15 +52,14 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 
 IDENTITY="${PERSONA_CODESIGN_IDENTITY:-}"
-if [[ -z "$IDENTITY" ]]; then
-  if security find-identity -v -p codesigning | grep -q '"Rover Dev"'; then
-    IDENTITY="Rover Dev"
-  else
-    IDENTITY="-"
+if [[ -n "$IDENTITY" ]]; then
+  codesign --force --deep --options runtime --sign "$IDENTITY" "$APP_DIR"
+  codesign --verify --deep --strict "$APP_DIR"
+else
+  if [[ -d "$APP_DIR/Contents/_CodeSignature" ]]; then
+    rm -rf "$APP_DIR/Contents/_CodeSignature"
   fi
+  echo "warning: skipping codesign for local dev app; set PERSONA_CODESIGN_IDENTITY to sign explicitly." >&2
 fi
-
-codesign --force --deep --options runtime --sign "$IDENTITY" "$APP_DIR"
-codesign --verify --deep --strict "$APP_DIR"
 
 echo "$APP_DIR"

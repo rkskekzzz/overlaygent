@@ -13,16 +13,13 @@ struct DashboardRootView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView {
             List(DashboardSection.allCases, selection: $selection) { section in
                 Label(section.title, systemImage: section.systemImageName)
                     .tag(section)
             }
-            .listStyle(.sidebar)
-            .frame(width: 220)
-
-            Divider()
-
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
+        } detail: {
             DashboardSectionDetailView(
                 section: selection ?? .general,
                 dependencies: dependencies

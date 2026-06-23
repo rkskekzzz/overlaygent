@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AgentEditorView: View {
     @Binding var profile: AgentProfile
+    var providers: [LLMProviderConfig] = []
 
     var body: some View {
         Form {
@@ -58,6 +59,18 @@ struct AgentEditorView: View {
             }
 
             Section("Provider") {
+                if providerOptions.isEmpty {
+                    Text("No providers configured")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Provider", selection: $profile.providerID) {
+                        ForEach(providerOptions) { provider in
+                            Text(providerPickerLabel(for: provider))
+                                .tag(provider.id)
+                        }
+                    }
+                }
+
                 TextField(
                     "Model Override",
                     text: Binding(
@@ -66,7 +79,7 @@ struct AgentEditorView: View {
                     )
                 )
 
-                Text(profile.providerID.uuidString)
+                Text("Provider ID: \(profile.providerID.uuidString)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -92,6 +105,24 @@ struct AgentEditorView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var providerOptions: [LLMProviderConfig] {
+        guard providers.contains(where: { $0.id == profile.providerID }) == false else {
+            return providers
+        }
+
+        return [
+            LLMProviderConfig.defaultOpenAICompatible(
+                id: profile.providerID,
+                name: "Missing Provider",
+                defaultModel: "Unavailable"
+            )
+        ] + providers
+    }
+
+    private func providerPickerLabel(for provider: LLMProviderConfig) -> String {
+        "\(provider.name) - \(provider.defaultModel)"
     }
 }
 

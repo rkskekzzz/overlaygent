@@ -1,48 +1,29 @@
-import AppKit
 import SwiftUI
 
-struct AgentSuggestionDisplayModel: Identifiable, Equatable {
-    var id: UUID
-    var agentName: String
-    var result: CorrectionResult
+enum AgentOverlayHeaderLayout {
+    static let outerPadding: CGFloat = 14
+    static let controlSize: CGFloat = 24
+    static let controlSpacing: CGFloat = 6
+    static let dragRegionHeight: CGFloat = 46
 
-    init(
-        id: UUID = UUID(),
-        agentName: String,
-        result: CorrectionResult
-    ) {
-        self.id = id
-        self.agentName = agentName
-        self.result = result
-    }
-
-    var summary: String? {
-        result.summary
-    }
-
-    var edits: [CorrectionEdit] {
-        result.edits
-    }
-
-    var fullRewrite: String? {
-        result.fullRewrite
-    }
+    static let closeControlReserve = controlSize
+    static let pagerControlReserve = (controlSize * 3) + (controlSpacing * 2)
 }
 
 @MainActor
 final class AgentResultPagerViewModel: ObservableObject {
-    @Published private(set) var suggestions: [AgentSuggestionDisplayModel]
+    @Published private(set) var suggestions: [AgentSuggestion]
     @Published private(set) var currentPageIndex: Int
 
     init(
-        suggestions: [AgentSuggestionDisplayModel],
+        suggestions: [AgentSuggestion],
         initialPageIndex: Int = 0
     ) {
         self.suggestions = suggestions
         self.currentPageIndex = Self.clampedPageIndex(initialPageIndex, suggestionCount: suggestions.count)
     }
 
-    var currentSuggestion: AgentSuggestionDisplayModel? {
+    var currentSuggestion: AgentSuggestion? {
         guard suggestions.indices.contains(currentPageIndex) else {
             return nil
         }
@@ -91,7 +72,7 @@ final class AgentResultPagerViewModel: ObservableObject {
     }
 
     func replaceSuggestions(
-        _ suggestions: [AgentSuggestionDisplayModel],
+        _ suggestions: [AgentSuggestion],
         preferredPageIndex: Int? = nil
     ) {
         self.suggestions = suggestions
@@ -113,14 +94,14 @@ final class AgentResultPagerViewModel: ObservableObject {
 struct AgentResultPagerView: View {
     @StateObject private var viewModel: AgentResultPagerViewModel
 
-    private let onApply: (AgentSuggestionDisplayModel) -> Void
+    private let onApply: (AgentSuggestion) -> Void
 
     @MainActor
     init(
-        suggestions: [AgentSuggestionDisplayModel],
+        suggestions: [AgentSuggestion],
         initialPageIndex: Int = 0,
-        onApply: @escaping (AgentSuggestionDisplayModel) -> Void,
-        onDismiss: @escaping (AgentSuggestionDisplayModel?) -> Void
+        onApply: @escaping (AgentSuggestion) -> Void,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
     ) {
         _viewModel = StateObject(
             wrappedValue: AgentResultPagerViewModel(
@@ -135,8 +116,8 @@ struct AgentResultPagerView: View {
     @MainActor
     init(
         viewModel: AgentResultPagerViewModel,
-        onApply: @escaping (AgentSuggestionDisplayModel) -> Void,
-        onDismiss: @escaping (AgentSuggestionDisplayModel?) -> Void
+        onApply: @escaping (AgentSuggestion) -> Void,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
     ) {
         _viewModel = StateObject(wrappedValue: viewModel)
         self.onApply = onApply
@@ -148,7 +129,10 @@ struct AgentResultPagerView: View {
             if let suggestion = viewModel.currentSuggestion {
                 compactHeader(for: suggestion)
 
-                SuggestionDetailView(suggestion: suggestion)
+                ScrollView {
+                    SuggestionDetailView(suggestion: suggestion)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                 actionBar(for: suggestion)
@@ -158,14 +142,14 @@ struct AgentResultPagerView: View {
         }
         .padding(14)
         .frame(
-            width: AgentSuggestionOverlayLayout.preferredContentSize.width,
-            height: AgentSuggestionOverlayLayout.preferredContentSize.height,
+            maxWidth: .infinity,
+            maxHeight: .infinity,
             alignment: .topLeading
         )
         .background(Color.clear)
     }
 
-    private func compactHeader(for suggestion: AgentSuggestionDisplayModel) -> some View {
+    private func compactHeader(for suggestion: AgentSuggestion) -> some View {
         HStack(spacing: 8) {
             Text(suggestion.agentName)
                 .font(.system(size: 13, weight: .semibold))
@@ -178,28 +162,15 @@ struct AgentResultPagerView: View {
             }
 
             Spacer(minLength: 8)
-
-            HStack(spacing: 6) {
-                Button {
-                    viewModel.goToPrevious()
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .buttonStyle(GlassIconButtonStyle(size: 24))
-                .disabled(viewModel.canGoPrevious == false)
-                .help("Previous suggestion")
-
-                Button {
-                    viewModel.goToNext()
-                } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .buttonStyle(GlassIconButtonStyle(size: 24))
-                .disabled(viewModel.canGoNext == false)
-                .help("Next suggestion")
-            }
-            .padding(.trailing, 28)
         }
+        .frame(height: AgentOverlayHeaderLayout.controlSize, alignment: .center)
+        .padding(.trailing, headerControlReserve)
+    }
+
+    private var headerControlReserve: CGFloat {
+        viewModel.suggestions.count > 1
+            ? AgentOverlayHeaderLayout.pagerControlReserve
+            : AgentOverlayHeaderLayout.closeControlReserve
     }
 
     private var emptyState: some View {
@@ -213,7 +184,7 @@ struct AgentResultPagerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    private func actionBar(for suggestion: AgentSuggestionDisplayModel) -> some View {
+    private func actionBar(for suggestion: AgentSuggestion) -> some View {
         HStack(spacing: 8) {
             Spacer()
 
@@ -229,7 +200,7 @@ struct AgentResultPagerView: View {
 }
 
 private struct SuggestionDetailView: View {
-    let suggestion: AgentSuggestionDisplayModel
+    let suggestion: AgentSuggestion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -245,7 +216,7 @@ private struct SuggestionDetailView: View {
                 .lineSpacing(2)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(5)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(10)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -289,7 +260,7 @@ struct AgentResultPagerView_Previews: PreviewProvider {
     static var previews: some View {
         AgentResultPagerView(
             suggestions: [
-                AgentSuggestionDisplayModel(
+                AgentSuggestion(
                     agentName: "Friendly Rewrite",
                     result: CorrectionResult(
                         summary: "Made the response warmer and easier to read.",
@@ -305,7 +276,7 @@ struct AgentResultPagerView_Previews: PreviewProvider {
                         fullRewrite: "Could we ship this today after the final review passes?"
                     )
                 ),
-                AgentSuggestionDisplayModel(
+                AgentSuggestion(
                     agentName: "Concise Reviewer",
                     result: CorrectionResult(
                         summary: "Reduced the wording while keeping the action clear.",

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Foundation
 import QuartzCore
 import SwiftUI
@@ -9,8 +10,12 @@ final class SuggestionPanelController: NSObject, SuggestionPanelPresenting {
     private var hostingController: NSHostingController<AnyView>?
     private lazy var contentContainer = GlassPanelContainerView(cornerRadius: 22)
     private lazy var panel: NSPanel = makePanel()
+    private var keyboardMonitor: Any?
+    private var suggestionKeyboardHandler: (@MainActor (AgentSuggestionOverlayKeyboardAction) -> Bool)?
 
     func setPlaceholder(title: String, detail: String) {
+        removeSuggestionKeyboardMonitor()
+
         let content: AnyView
         if title == "Running agents" {
             content = AnyView(AgentThinkingOverlayContent(detail: detail))
@@ -24,9 +29,9 @@ final class SuggestionPanelController: NSObject, SuggestionPanelPresenting {
     }
 
     func setSuggestions(
-        _ suggestions: [AgentSuggestionDisplayModel],
-        onApply: @escaping (AgentSuggestionDisplayModel) -> Bool,
-        onDismiss: @escaping (AgentSuggestionDisplayModel?) -> Void
+        _ suggestions: [AgentSuggestion],
+        onApply: @escaping (AgentSuggestion) -> Bool,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
     ) {
         MainActor.assumeIsolated {
             setSuggestionsOnMain(
@@ -39,32 +44,42 @@ final class SuggestionPanelController: NSObject, SuggestionPanelPresenting {
 
     @MainActor
     private func setSuggestionsOnMain(
-        _ suggestions: [AgentSuggestionDisplayModel],
-        onApply: @escaping (AgentSuggestionDisplayModel) -> Bool,
-        onDismiss: @escaping (AgentSuggestionDisplayModel?) -> Void
+        _ suggestions: [AgentSuggestion],
+        onApply: @escaping (AgentSuggestion) -> Bool,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
     ) {
         guard suggestions.isEmpty == false else {
             setPlaceholder(title: "Agent Suggestions", detail: "No successful suggestions.")
             return
         }
 
-        let pagerView = AgentResultPagerView(
-            suggestions: suggestions,
-            onApply: { [weak self] suggestion in
-                if onApply(suggestion) {
-                    self?.hide()
-                }
-            },
-            onDismiss: { [weak self] suggestion in
-                onDismiss(suggestion)
+        let pagerViewModel = AgentResultPagerViewModel(suggestions: suggestions)
+        let applySuggestion: (AgentSuggestion) -> Void = { [weak self] suggestion in
+            if onApply(suggestion) {
                 self?.hide()
             }
+        }
+        let dismissSuggestion: (AgentSuggestion?) -> Void = { [weak self] suggestion in
+            onDismiss(suggestion)
+            self?.hide()
+        }
+        let pagerView = AgentResultPagerView(
+            viewModel: pagerViewModel,
+            onApply: applySuggestion,
+            onDismiss: dismissSuggestion
+        )
+        installSuggestionKeyboardMonitor(
+            viewModel: pagerViewModel,
+            onApply: applySuggestion,
+            onDismiss: dismissSuggestion
         )
         installOverlayContent(
             AnyView(pagerView),
-            onClose: { [weak self] in
-                onDismiss(nil)
-                self?.hide()
+            onClose: {
+                dismissSuggestion(nil)
+            },
+            toolbarContent: {
+                AgentResultPagerNavigationControls(viewModel: pagerViewModel)
             }
         )
     }
@@ -72,10 +87,78 @@ final class SuggestionPanelController: NSObject, SuggestionPanelPresenting {
     func show(frame: CGRect) {
         panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
+        if suggestionKeyboardHandler != nil {
+            panel.makeKey()
+        }
     }
 
     func hide() {
+        removeSuggestionKeyboardMonitor()
         panel.orderOut(nil)
+    }
+
+    @MainActor
+    private func installSuggestionKeyboardMonitor(
+        viewModel: AgentResultPagerViewModel,
+        onApply: @escaping (AgentSuggestion) -> Void,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
+    ) {
+        removeSuggestionKeyboardMonitor()
+        suggestionKeyboardHandler = { [weak viewModel] action in
+            guard let viewModel else {
+                return false
+            }
+
+            switch action {
+            case .previous:
+                viewModel.goToPrevious()
+            case .next:
+                viewModel.goToNext()
+            case .apply:
+                guard let suggestion = viewModel.currentSuggestion else {
+                    return true
+                }
+                onApply(suggestion)
+            case .dismiss:
+                onDismiss(nil)
+            }
+
+            return true
+        }
+        keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleOverlayKeyDown(event) ?? event
+        }
+    }
+
+    private func removeSuggestionKeyboardMonitor() {
+        if let keyboardMonitor {
+            NSEvent.removeMonitor(keyboardMonitor)
+        }
+
+        keyboardMonitor = nil
+        suggestionKeyboardHandler = nil
+    }
+
+    private func handleOverlayKeyDown(_ event: NSEvent) -> NSEvent? {
+        let keyCode = event.keyCode
+        let modifierFlags = event.modifierFlags
+        let shouldConsume = MainActor.assumeIsolated {
+            guard panel.isVisible,
+                  panel.isKeyWindow,
+                  let action = AgentSuggestionOverlayKeyboardAction.action(
+                    forKeyCode: keyCode,
+                    modifierFlags: modifierFlags
+                  ),
+                  let suggestionKeyboardHandler,
+                  suggestionKeyboardHandler(action)
+            else {
+                return false
+            }
+
+            return true
+        }
+
+        return shouldConsume ? nil : event
     }
 
     private func makePanel() -> NSPanel {
@@ -95,6 +178,7 @@ final class SuggestionPanelController: NSObject, SuggestionPanelPresenting {
         panel.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.001)
         panel.alphaValue = 0.97
         panel.ignoresMouseEvents = false
+        panel.isMovableByWindowBackground = true
 
         contentContainer.frame = CGRect(origin: .zero, size: preferredContentSize)
         panel.contentView = contentContainer
@@ -105,8 +189,25 @@ final class SuggestionPanelController: NSObject, SuggestionPanelPresenting {
         _ content: AnyView,
         onClose: @escaping () -> Void
     ) {
+        installOverlayContent(
+            content,
+            onClose: onClose,
+            toolbarContent: {
+                EmptyView()
+            }
+        )
+    }
+
+    private func installOverlayContent<ToolbarContent: View>(
+        _ content: AnyView,
+        onClose: @escaping () -> Void,
+        @ViewBuilder toolbarContent: () -> ToolbarContent
+    ) {
         let rootView = AnyView(
-            AgentOverlayShell(onClose: onClose) {
+            AgentOverlayShell(
+                onClose: onClose,
+                toolbarContent: toolbarContent
+            ) {
                 content
             }
         )
@@ -142,6 +243,40 @@ final class SuggestionPanelController: NSObject, SuggestionPanelPresenting {
         prepareHostedView(view, size: size)
         contentContainer.frame = CGRect(origin: .zero, size: size)
         contentContainer.installContentView(view)
+    }
+}
+
+enum AgentSuggestionOverlayKeyboardAction: Equatable {
+    case previous
+    case next
+    case apply
+    case dismiss
+
+    static func action(for event: NSEvent) -> AgentSuggestionOverlayKeyboardAction? {
+        action(forKeyCode: event.keyCode, modifierFlags: event.modifierFlags)
+    }
+
+    static func action(
+        forKeyCode keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> AgentSuggestionOverlayKeyboardAction? {
+        let disallowedModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        guard modifierFlags.intersection(disallowedModifiers).isEmpty else {
+            return nil
+        }
+
+        switch keyCode {
+        case UInt16(kVK_LeftArrow):
+            return .previous
+        case UInt16(kVK_RightArrow):
+            return .next
+        case UInt16(kVK_Return), UInt16(kVK_ANSI_KeypadEnter):
+            return .apply
+        case UInt16(kVK_Escape):
+            return .dismiss
+        default:
+            return nil
+        }
     }
 }
 
@@ -194,6 +329,10 @@ private final class GlassPanelContainerView: NSView {
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override var mouseDownCanMoveWindow: Bool {
         true
     }
 
@@ -254,39 +393,112 @@ private final class PassthroughLayerView: NSView {
     }
 }
 
-private struct AgentOverlayShell<Content: View>: View {
+private struct AgentOverlayShell<Content: View, ToolbarContent: View>: View {
     let onClose: () -> Void
+    let toolbarContent: ToolbarContent
     let content: Content
 
     init(
         onClose: @escaping () -> Void,
+        @ViewBuilder toolbarContent: () -> ToolbarContent,
         @ViewBuilder content: () -> Content
     ) {
         self.onClose = onClose
+        self.toolbarContent = toolbarContent()
         self.content = content()
     }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            content
+            WindowDragRegion()
                 .frame(
-                    width: AgentStatusOverlayLayout.preferredContentSize.width,
-                    height: AgentStatusOverlayLayout.preferredContentSize.height
+                    maxWidth: .infinity,
+                    maxHeight: .infinity
                 )
 
-            Button(action: onClose) {
-                Image(systemName: "xmark")
+            content
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity
+                )
+
+            VStack(spacing: 0) {
+                WindowDragRegion()
+                    .frame(height: AgentOverlayHeaderLayout.dragRegionHeight)
+
+                Spacer(minLength: 0)
             }
-            .buttonStyle(GlassIconButtonStyle(size: 24))
-            .keyboardShortcut(.cancelAction)
-            .help("Close")
-            .padding(10)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity
+            )
+
+            HStack(spacing: AgentOverlayHeaderLayout.controlSpacing) {
+                toolbarContent
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(GlassIconButtonStyle(size: AgentOverlayHeaderLayout.controlSize))
+                .keyboardShortcut(.cancelAction)
+                .help("Close")
+            }
+            .padding(.top, AgentOverlayHeaderLayout.outerPadding)
+            .padding(.trailing, AgentOverlayHeaderLayout.outerPadding)
         }
         .frame(
-            width: AgentStatusOverlayLayout.preferredContentSize.width,
-            height: AgentStatusOverlayLayout.preferredContentSize.height
+            maxWidth: .infinity,
+            maxHeight: .infinity
         )
         .background(Color.clear)
+    }
+}
+
+private struct AgentResultPagerNavigationControls: View {
+    @ObservedObject var viewModel: AgentResultPagerViewModel
+
+    var body: some View {
+        if viewModel.suggestions.count > 1 {
+            Button {
+                viewModel.goToPrevious()
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(GlassIconButtonStyle(size: AgentOverlayHeaderLayout.controlSize))
+            .disabled(viewModel.canGoPrevious == false)
+            .help("Previous suggestion")
+
+            Button {
+                viewModel.goToNext()
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(GlassIconButtonStyle(size: AgentOverlayHeaderLayout.controlSize))
+            .disabled(viewModel.canGoNext == false)
+            .help("Next suggestion")
+        }
+    }
+}
+
+private struct WindowDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> WindowDragRegionView {
+        WindowDragRegionView()
+    }
+
+    func updateNSView(_ nsView: WindowDragRegionView, context: Context) {}
+}
+
+private final class WindowDragRegionView: NSView {
+    override var mouseDownCanMoveWindow: Bool {
+        true
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
     }
 }
 
@@ -308,15 +520,15 @@ private struct AgentThinkingOverlayContent: View {
                     Text(detail)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .multilineTextAlignment(.center)
-                        .frame(maxWidth: 240)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
         .frame(
-            width: AgentStatusOverlayLayout.preferredContentSize.width,
-            height: AgentStatusOverlayLayout.preferredContentSize.height,
+            maxWidth: .infinity,
+            maxHeight: .infinity,
             alignment: .center
         )
         .background(Color.clear)
@@ -345,11 +557,11 @@ private struct AgentStatusOverlayContent: View {
                 Spacer(minLength: 28)
             }
             .padding(14)
-            .frame(width: AgentStatusOverlayLayout.contentWidth, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(
-            width: AgentStatusOverlayLayout.preferredContentSize.width,
-            height: AgentStatusOverlayLayout.preferredContentSize.height,
+            maxWidth: .infinity,
+            maxHeight: .infinity,
             alignment: .center
         )
         .background(Color.clear)

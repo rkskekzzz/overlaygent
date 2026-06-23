@@ -25,9 +25,9 @@ protocol ActiveAgentSuggestionPresenting: AnyObject {
     @discardableResult
     func showSuggestions(
         anchor: OverlayAnchorGeometry,
-        suggestions: [AgentSuggestionDisplayModel],
-        onApply: @escaping (AgentSuggestionDisplayModel) -> Bool,
-        onDismiss: @escaping (AgentSuggestionDisplayModel?) -> Void
+        suggestions: [AgentSuggestion],
+        onApply: @escaping (AgentSuggestion) -> Bool,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
     ) -> OverlayPanelPlacement
 }
 
@@ -234,7 +234,7 @@ final class RunActiveAgentsCoordinator: RunActiveAgentsCoordinating {
     private func applyHandler(
         for preparedRequest: AgentRunPreparedRequest,
         failureAnchor: OverlayAnchorGeometry
-    ) -> (AgentSuggestionDisplayModel) -> Bool {
+    ) -> (AgentSuggestion) -> Bool {
         return { [logger, overlayPresenter, suggestionApplyCoordinator] suggestion in
             let outcome = suggestionApplyCoordinator.apply(suggestion, preparedRequest: preparedRequest)
             if let failure = outcome.failure {
@@ -256,7 +256,7 @@ final class RunActiveAgentsCoordinator: RunActiveAgentsCoordinating {
         }
     }
 
-    private func dismissHandler() -> (AgentSuggestionDisplayModel?) -> Void {
+    private func dismissHandler() -> (AgentSuggestion?) -> Void {
         { [logger] suggestion in
             if let suggestion {
                 logger("Dismissed suggestion \(suggestion.id.uuidString).")
@@ -266,7 +266,7 @@ final class RunActiveAgentsCoordinator: RunActiveAgentsCoordinating {
         }
     }
 
-    static func displayModels(from results: [AgentCorrectionResult]) -> [AgentSuggestionDisplayModel] {
+    static func displayModels(from results: [AgentCorrectionResult]) -> [AgentSuggestion] {
         results.compactMap { result in
             guard result.isSuccess,
                   let correctionResult = result.result
@@ -274,7 +274,7 @@ final class RunActiveAgentsCoordinator: RunActiveAgentsCoordinating {
                 return nil
             }
 
-            return AgentSuggestionDisplayModel(
+            return AgentSuggestion(
                 id: result.agentID,
                 agentName: result.agentName,
                 result: correctionResult

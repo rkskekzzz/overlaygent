@@ -9,18 +9,27 @@ struct AXValueApplier: EditApplier {
     private let element: AXElement
     private let writer: AXValueWriting
     private let valueReader: (any AXTextValueReading)?
+    private let focusRestorer: (any AXTextFocusRestoring)?
     private let planner: EditApplicationPlanner
+    private let focusSettleDelay: TimeInterval
+    private let sleeper: (TimeInterval) -> Void
 
     init(
         element: AXElement,
         writer: AXValueWriting = SystemAXValueWriter(),
         valueReader: (any AXTextValueReading)? = SystemAXTextValueReader(),
-        planner: EditApplicationPlanner = EditApplicationPlanner()
+        focusRestorer: (any AXTextFocusRestoring)? = SystemAXTextFocusRestorer(),
+        planner: EditApplicationPlanner = EditApplicationPlanner(),
+        focusSettleDelay: TimeInterval = 0.08,
+        sleeper: @escaping (TimeInterval) -> Void = Thread.sleep(forTimeInterval:)
     ) {
         self.element = element
         self.writer = writer
         self.valueReader = valueReader
+        self.focusRestorer = focusRestorer
         self.planner = planner
+        self.focusSettleDelay = focusSettleDelay
+        self.sleeper = sleeper
     }
 
     @discardableResult
@@ -36,10 +45,21 @@ struct AXValueApplier: EditApplier {
             ]
         )
 
+        restoreFocusIfPossible()
         try writer.setValue(plan.resultingText, on: element)
         try verifyAppliedPlan(plan)
 
         return plan
+    }
+
+    private func restoreFocusIfPossible() {
+        guard let processID = focusRestorer?.restoreFocus(to: element),
+              processID > 0,
+              focusSettleDelay > 0 else {
+            return
+        }
+
+        sleeper(focusSettleDelay)
     }
 
     private func verifyAppliedPlan(_ plan: EditApplicationPlan) throws {

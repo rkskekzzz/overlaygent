@@ -119,18 +119,15 @@ final class SuggestionApplyCoordinatorTests: XCTestCase {
         XCTAssertEqual(factory.requests.map(\.applyMode), [.axSelectedText, .clipboardPaste])
     }
 
-    func testFallsBackToFullRewriteWhenSuggestionHasNoSingleGranularEdit() throws {
+    func testAppliesMultipleGranularEditsFromEndToStart() throws {
         let agentID = UUID(uuidString: "00000000-0000-0000-0000-000000001103")!
         let snapshot = textSnapshot("Make it")
-        let generatedEdit = CorrectionEdit(
-            rangeStart: 0,
-            rangeEnd: 7,
-            original: "Make it",
-            replacement: "Ship it",
-            reason: "Apply full rewrite"
-        )
-        let expectedPlan = try EditApplicationPlanner().plan(for: generatedEdit, in: snapshot)
-        let applier = RecordingEditApplier(result: .success(expectedPlan))
+        let firstAppliedEdit = correctionEdit(range: 5..<7, original: "it", replacement: "this")
+        let secondAppliedEdit = correctionEdit(range: 0..<4, original: "Make", replacement: "Ship")
+        let firstPlan = try EditApplicationPlanner().plan(for: firstAppliedEdit, in: snapshot)
+        let secondSnapshot = textSnapshot(firstPlan.resultingText)
+        let secondPlan = try EditApplicationPlanner().plan(for: secondAppliedEdit, in: secondSnapshot)
+        let applier = RecordingEditApplier(results: [.success(firstPlan), .success(secondPlan)])
         let factory = RecordingEditApplierFactory(applier: applier)
         let coordinator = SuggestionApplyCoordinator(applierFactory: factory)
 
@@ -138,8 +135,8 @@ final class SuggestionApplyCoordinatorTests: XCTestCase {
             suggestion(
                 id: agentID,
                 edits: [
-                    correctionEdit(range: 0..<4, original: "Make", replacement: "Ship"),
-                    correctionEdit(range: 5..<7, original: "it", replacement: "this")
+                    secondAppliedEdit,
+                    firstAppliedEdit
                 ],
                 fullRewrite: "Ship it"
             ),
@@ -154,8 +151,14 @@ final class SuggestionApplyCoordinatorTests: XCTestCase {
         )
 
         XCTAssertTrue(outcome.isSuccess)
-        XCTAssertEqual(outcome.appliedPlans, [expectedPlan])
-        XCTAssertEqual(applier.calls, [RecordingEditApplier.Call(edit: generatedEdit, snapshot: snapshot)])
+        XCTAssertEqual(outcome.appliedPlans, [firstPlan, secondPlan])
+        XCTAssertEqual(
+            applier.calls,
+            [
+                RecordingEditApplier.Call(edit: firstAppliedEdit, snapshot: snapshot),
+                RecordingEditApplier.Call(edit: secondAppliedEdit, snapshot: secondSnapshot)
+            ]
+        )
     }
 
     func testMapsApplierErrorsToSafeFailure() {
@@ -248,8 +251,8 @@ final class SuggestionApplyCoordinatorTests: XCTestCase {
         id: UUID,
         edits: [CorrectionEdit],
         fullRewrite: String? = nil
-    ) -> AgentSuggestionDisplayModel {
-        AgentSuggestionDisplayModel(
+    ) -> AgentSuggestion {
+        AgentSuggestion(
             id: id,
             agentName: "Test Agent",
             result: CorrectionResult(summary: "Apply test", edits: edits, fullRewrite: fullRewrite)
@@ -304,16 +307,24 @@ private final class RecordingEditApplier: EditApplier {
         var snapshot: TextSnapshot
     }
 
-    private let result: Result<EditApplicationPlan, Error>
+    private var results: [Result<EditApplicationPlan, Error>]
     private(set) var calls: [Call] = []
 
     init(result: Result<EditApplicationPlan, Error>) {
-        self.result = result
+        self.results = [result]
+    }
+
+    init(results: [Result<EditApplicationPlan, Error>]) {
+        self.results = results
     }
 
     func apply(_ edit: CorrectionEdit, to snapshot: TextSnapshot) throws -> EditApplicationPlan {
         calls.append(Call(edit: edit, snapshot: snapshot))
-        return try result.get()
+        guard results.isEmpty == false else {
+            throw TestApplyError.failed
+        }
+
+        return try results.removeFirst().get()
     }
 }
 

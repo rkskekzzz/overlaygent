@@ -101,6 +101,31 @@ final class AXFocusedElementReaderTests: XCTestCase {
     }
 }
 
+final class SystemAXCoordinateConverterTests: XCTestCase {
+    func testConvertsTopLeftAXRectOnPrimaryScreenToAppKitRect() {
+        let rect = SystemAXCoordinateConverter.appKitRect(
+            fromAXTopLeftRect: CGRect(x: 20, y: 900, width: 420, height: 44),
+            screenFrames: [
+                CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+            ]
+        )
+
+        XCTAssertEqual(rect, CGRect(x: 20, y: 136, width: 420, height: 44))
+    }
+
+    func testUsesPrimaryScreenTopWhenAnotherDisplayExtendsAboveIt() {
+        let rect = SystemAXCoordinateConverter.appKitRect(
+            fromAXTopLeftRect: CGRect(x: 20, y: 900, width: 420, height: 44),
+            screenFrames: [
+                CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
+                CGRect(x: -1_080, y: -410, width: 1_080, height: 1_920)
+            ]
+        )
+
+        XCTAssertEqual(rect, CGRect(x: 20, y: 136, width: 420, height: 44))
+    }
+}
+
 private final class FakeAXNode: NSObject {}
 
 private final class FakeAXCoordinateConverter: AXCoordinateConverting {

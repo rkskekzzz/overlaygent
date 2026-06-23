@@ -1,49 +1,12 @@
 import Foundation
 import SQLite3
 
-protocol LLMResponseCaching: AnyObject {
-    func cachedRawResponse(
-        for bundle: AgentMessageBundle,
-        provider: LLMProviderConfig,
-        now: Date
-    ) throws -> String?
-
-    func storeRawResponse(
-        _ rawResponse: String,
-        for bundle: AgentMessageBundle,
-        provider: LLMProviderConfig,
-        now: Date
-    ) throws
-
-    func removeExpiredResponses(now: Date) throws
-}
-
-final class NoopLLMResponseCache: LLMResponseCaching {
-    func cachedRawResponse(
-        for bundle: AgentMessageBundle,
-        provider: LLMProviderConfig,
-        now: Date
-    ) throws -> String? {
-        nil
-    }
-
-    func storeRawResponse(
-        _ rawResponse: String,
-        for bundle: AgentMessageBundle,
-        provider: LLMProviderConfig,
-        now: Date
-    ) throws {}
-
-    func removeExpiredResponses(now: Date) throws {}
-}
-
 enum SQLiteLLMResponseCacheError: Error, CustomStringConvertible {
     case openFailed(String)
     case prepareFailed(String)
     case executeFailed(String)
     case bindFailed(String)
     case stepFailed(String)
-    case encodeFailed
 
     var description: String {
         switch self {
@@ -57,8 +20,6 @@ enum SQLiteLLMResponseCacheError: Error, CustomStringConvertible {
             return "Could not bind LLM response cache statement: \(message)"
         case let .stepFailed(message):
             return "Could not step LLM response cache statement: \(message)"
-        case .encodeFailed:
-            return "Could not encode LLM response cache key."
         }
     }
 }
@@ -70,19 +31,16 @@ final class SQLiteLLMResponseCache: LLMResponseCaching {
     private let fileURL: URL
     private let fileManager: FileManager
     private let ttl: TimeInterval
-    private let keyFactory: LLMResponseCacheKeyFactory
     private let lock = NSLock()
 
     init(
         fileURL: URL = SQLiteLLMResponseCache.defaultFileURL(),
         fileManager: FileManager = .default,
-        ttl: TimeInterval = SQLiteLLMResponseCache.defaultTTL,
-        keyFactory: LLMResponseCacheKeyFactory = LLMResponseCacheKeyFactory()
+        ttl: TimeInterval = SQLiteLLMResponseCache.defaultTTL
     ) {
         self.fileURL = fileURL
         self.fileManager = fileManager
         self.ttl = ttl
-        self.keyFactory = keyFactory
     }
 
     static func defaultFileURL(fileManager: FileManager = .default) -> URL {
@@ -90,8 +48,7 @@ final class SQLiteLLMResponseCache: LLMResponseCaching {
     }
 
     func cachedRawResponse(
-        for bundle: AgentMessageBundle,
-        provider: LLMProviderConfig,
+        forCacheKey cacheKey: String,
         now: Date
     ) throws -> String? {
         try locked {
@@ -100,7 +57,6 @@ final class SQLiteLLMResponseCache: LLMResponseCaching {
             try ensureSchema(database)
             try removeExpiredResponses(database: database, now: now)
 
-            let cacheKey = try keyFactory.cacheKey(for: bundle, provider: provider)
             let statement = try prepare(
                 """
                 SELECT raw_response
@@ -138,8 +94,7 @@ final class SQLiteLLMResponseCache: LLMResponseCaching {
 
     func storeRawResponse(
         _ rawResponse: String,
-        for bundle: AgentMessageBundle,
-        provider: LLMProviderConfig,
+        forCacheKey cacheKey: String,
         now: Date
     ) throws {
         try locked {
@@ -148,7 +103,6 @@ final class SQLiteLLMResponseCache: LLMResponseCaching {
             try ensureSchema(database)
             try removeExpiredResponses(database: database, now: now)
 
-            let cacheKey = try keyFactory.cacheKey(for: bundle, provider: provider)
             let statement = try prepare(
                 """
                 INSERT OR REPLACE INTO llm_response_cache
@@ -287,93 +241,4 @@ final class SQLiteLLMResponseCache: LLMResponseCaching {
     private func errorMessage(_ database: OpaquePointer) -> String {
         sqlite3_errmsg(database).map { String(cString: $0) } ?? "unknown sqlite error"
     }
-}
-
-struct LLMResponseCacheKeyFactory {
-    private let encoder: JSONEncoder
-    private let hasher: TextSnapshotHasher
-
-    init(
-        encoder: JSONEncoder = JSONEncoder(),
-        hasher: TextSnapshotHasher = TextSnapshotHasher()
-    ) {
-        encoder.outputFormatting = [.sortedKeys]
-        self.encoder = encoder
-        self.hasher = hasher
-    }
-
-    func cacheKey(
-        for bundle: AgentMessageBundle,
-        provider: LLMProviderConfig
-    ) throws -> String {
-        let payload = LLMResponseCacheKeyPayload(
-            bundle: LLMResponseCacheBundleFingerprint(bundle),
-            provider: LLMResponseCacheProviderFingerprint(
-                id: provider.id.uuidString,
-                baseURL: provider.baseURL.absoluteString,
-                defaultModel: provider.defaultModel,
-                temperature: provider.temperature,
-                maxTokens: provider.maxTokens
-            )
-        )
-
-        guard let json = try? encoder.encode(payload),
-              let string = String(data: json, encoding: .utf8) else {
-            throw SQLiteLLMResponseCacheError.encodeFailed
-        }
-
-        return hasher.hash(text: string)
-    }
-}
-
-private struct LLMResponseCacheKeyPayload: Encodable {
-    var version = 2
-    var bundle: LLMResponseCacheBundleFingerprint
-    var provider: LLMResponseCacheProviderFingerprint
-}
-
-private struct LLMResponseCacheBundleFingerprint: Encodable {
-    var agentID: UUID
-    var agentName: String
-    var providerID: UUID
-    var resolvedModel: String?
-    var messages: [AgentMessage]
-    var outputSchemaID: String
-    var budgetMetadata: AgentMessageBudgetMetadata
-
-    init(_ bundle: AgentMessageBundle) {
-        self.agentID = bundle.agentID
-        self.agentName = bundle.agentName
-        self.providerID = bundle.providerID
-        self.resolvedModel = bundle.resolvedModel
-        self.messages = bundle.messages.map(Self.normalizedMessage)
-        self.outputSchemaID = bundle.outputSchemaID
-        self.budgetMetadata = bundle.budgetMetadata
-    }
-
-    private static func normalizedMessage(_ message: AgentMessage) -> AgentMessage {
-        guard message.role == .user else {
-            return message
-        }
-
-        return AgentMessage(
-            role: message.role,
-            content: message.content
-                .components(separatedBy: "\n")
-                .map { line in
-                    line.hasPrefix("Selected range:")
-                        ? "Selected range: <ignored for cache>"
-                        : line
-                }
-                .joined(separator: "\n")
-        )
-    }
-}
-
-private struct LLMResponseCacheProviderFingerprint: Encodable {
-    var id: String
-    var baseURL: String
-    var defaultModel: String
-    var temperature: Double
-    var maxTokens: Int
 }

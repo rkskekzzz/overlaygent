@@ -94,8 +94,8 @@ final class AgentResultPagerViewModelTests: XCTestCase {
     private func suggestion(
         id: UUID = UUID(),
         agentName: String
-    ) -> AgentSuggestionDisplayModel {
-        AgentSuggestionDisplayModel(
+    ) -> AgentSuggestion {
+        AgentSuggestion(
             id: id,
             agentName: agentName,
             result: CorrectionResult(

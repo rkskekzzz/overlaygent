@@ -1,3 +1,5 @@
+import AppKit
+import Carbon
 import CoreGraphics
 import XCTest
 @testable import PersonaWritingAgent
@@ -61,7 +63,7 @@ final class OverlayPositioningTests: XCTestCase {
         )
 
         XCTAssertEqual(placement.anchorSource, .input)
-        XCTAssertEqual(placement.frame, CGRect(x: 310, y: 354, width: 200, height: 80))
+        XCTAssertEqual(placement.frame, CGRect(x: 300, y: 354, width: 200, height: 80))
     }
 
     func testPrefersInputRectWhenCaretIsInsideInputFrame() {
@@ -75,7 +77,7 @@ final class OverlayPositioningTests: XCTestCase {
         )
 
         XCTAssertEqual(placement.anchorSource, .input)
-        XCTAssertEqual(placement.frame, CGRect(x: 310, y: 354, width: 200, height: 80))
+        XCTAssertEqual(placement.frame, CGRect(x: 300, y: 354, width: 200, height: 80))
     }
 
     func testFallsBackToCaretWhenInputRectLooksLikeWholeDocument() {
@@ -119,6 +121,17 @@ final class OverlayPositioningTests: XCTestCase {
         XCTAssertLessThanOrEqual(placement.frame.maxX, 1_012)
         XCTAssertGreaterThanOrEqual(placement.frame.minY, 12)
         XCTAssertLessThanOrEqual(placement.frame.maxY, 756)
+    }
+
+    func testShrinksPanelToVisibleFrameWithPaddingWhenRequestedSizeIsTooWide() {
+        let positioner = OverlayPositioning(defaultPanelSize: CGSize(width: 500, height: 400), spacing: 8, screenPadding: 12)
+        let placement = positioner.placement(
+            for: OverlayAnchorGeometry(caretRect: CGRect(x: 150, y: 100, width: 1, height: 1)),
+            panelSize: CGSize(width: 500, height: 400),
+            visibleFrame: CGRect(x: 0, y: 0, width: 300, height: 200)
+        )
+
+        XCTAssertEqual(placement.frame, CGRect(x: 12, y: 12, width: 276, height: 176))
     }
 }
 
@@ -174,8 +187,8 @@ final class OverlayControllerTests: XCTestCase {
         let anchorRect = CGRect(x: 500, y: 600, width: 2, height: 20)
         let visibleFrame = CGRect(x: 0, y: 0, width: 1_000, height: 800)
         var requestedScreenRect: CGRect?
-        var appliedSuggestion: AgentSuggestionDisplayModel?
-        var dismissedSuggestion: AgentSuggestionDisplayModel?
+        var appliedSuggestion: AgentSuggestion?
+        var dismissedSuggestion: AgentSuggestion?
         let suggestion = suggestion(agentName: "Natural English")
         let controller = OverlayController(
             panelController: panelController,
@@ -198,7 +211,7 @@ final class OverlayControllerTests: XCTestCase {
 
         XCTAssertEqual(requestedScreenRect, anchorRect)
         XCTAssertEqual(placement.anchorSource, .caret)
-        XCTAssertEqual(placement.frame, CGRect(x: 311, y: 366, width: 380, height: 224))
+        XCTAssertEqual(placement.frame, CGRect(x: 401, y: 630, width: 200, height: 100))
         XCTAssertEqual(panelController.presentedSuggestions, [suggestion])
         XCTAssertEqual(panelController.shownFrame, placement.frame)
 
@@ -209,8 +222,8 @@ final class OverlayControllerTests: XCTestCase {
         XCTAssertEqual(dismissedSuggestion, suggestion)
     }
 
-    private func suggestion(agentName: String) -> AgentSuggestionDisplayModel {
-        AgentSuggestionDisplayModel(
+    private func suggestion(agentName: String) -> AgentSuggestion {
+        AgentSuggestion(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000901")!,
             agentName: agentName,
             result: CorrectionResult(
@@ -230,13 +243,44 @@ final class OverlayControllerTests: XCTestCase {
     }
 }
 
+final class AgentSuggestionOverlayKeyboardActionTests: XCTestCase {
+    func testMapsPlainOverlayNavigationKeys() {
+        XCTAssertEqual(action(for: kVK_LeftArrow), .previous)
+        XCTAssertEqual(action(for: kVK_RightArrow), .next)
+        XCTAssertEqual(action(for: kVK_Return), .apply)
+        XCTAssertEqual(action(for: kVK_ANSI_KeypadEnter), .apply)
+        XCTAssertEqual(action(for: kVK_Escape), .dismiss)
+    }
+
+    func testIgnoresModifiedNavigationKeys() {
+        XCTAssertNil(action(for: kVK_LeftArrow, modifiers: [.shift]))
+        XCTAssertNil(action(for: kVK_RightArrow, modifiers: [.command]))
+        XCTAssertNil(action(for: kVK_Return, modifiers: [.option]))
+        XCTAssertNil(action(for: kVK_Escape, modifiers: [.control]))
+    }
+
+    func testIgnoresUnrelatedKeys() {
+        XCTAssertNil(action(for: kVK_ANSI_A))
+    }
+
+    private func action(
+        for keyCode: Int,
+        modifiers: NSEvent.ModifierFlags = []
+    ) -> AgentSuggestionOverlayKeyboardAction? {
+        AgentSuggestionOverlayKeyboardAction.action(
+            forKeyCode: UInt16(keyCode),
+            modifierFlags: modifiers
+        )
+    }
+}
+
 private final class FakeSuggestionPanelController: SuggestionPanelPresenting {
     let preferredContentSize: CGSize
     private(set) var placeholderTitle: String?
     private(set) var placeholderDetail: String?
-    private(set) var presentedSuggestions: [AgentSuggestionDisplayModel] = []
-    private(set) var applyHandler: ((AgentSuggestionDisplayModel) -> Bool)?
-    private(set) var dismissHandler: ((AgentSuggestionDisplayModel?) -> Void)?
+    private(set) var presentedSuggestions: [AgentSuggestion] = []
+    private(set) var applyHandler: ((AgentSuggestion) -> Bool)?
+    private(set) var dismissHandler: ((AgentSuggestion?) -> Void)?
     private(set) var shownFrame: CGRect?
     private(set) var didHide = false
 
@@ -250,9 +294,9 @@ private final class FakeSuggestionPanelController: SuggestionPanelPresenting {
     }
 
     func setSuggestions(
-        _ suggestions: [AgentSuggestionDisplayModel],
-        onApply: @escaping (AgentSuggestionDisplayModel) -> Bool,
-        onDismiss: @escaping (AgentSuggestionDisplayModel?) -> Void
+        _ suggestions: [AgentSuggestion],
+        onApply: @escaping (AgentSuggestion) -> Bool,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
     ) {
         presentedSuggestions = suggestions
         applyHandler = onApply

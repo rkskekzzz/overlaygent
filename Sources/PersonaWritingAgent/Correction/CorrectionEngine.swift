@@ -42,54 +42,38 @@ struct AgentCorrectionResult: Equatable {
     }
 }
 
-struct CorrectionEngine {
-    private let privacyGuard: PrivacyGuard
-    private let messageFactory: AgentMessageFactory
-    private let providerConfigLoader: any LLMProviderConfigLoading
+protocol AgentCorrectionRuntime {
+    func correctionResult(
+        for bundle: AgentMessageBundle,
+        providersByID: [UUID: LLMProviderConfig]
+    ) async throws -> AgentCorrectionResult
+}
+
+struct LLMProviderCorrectionRuntime: AgentCorrectionRuntime {
     private let apiKeyStore: any LLMProviderAPIKeyStoring
     private let llmProvider: any LLMProvider
     private let responseCache: any LLMResponseCaching
+    private let responseCacheKeyFactory: any LLMResponseCacheKeyMaking
     private let parser: CorrectionResultParser
     private let now: () -> Date
 
     init(
-        providerConfigLoader: any LLMProviderConfigLoading,
         apiKeyStore: any LLMProviderAPIKeyStoring,
         llmProvider: any LLMProvider,
         responseCache: any LLMResponseCaching = NoopLLMResponseCache(),
-        privacyGuard: PrivacyGuard = PrivacyGuard(),
-        messageFactory: AgentMessageFactory = AgentMessageFactory(),
+        responseCacheKeyFactory: any LLMResponseCacheKeyMaking = LLMResponseCacheKeyFactory(),
         parser: CorrectionResultParser = CorrectionResultParser(),
         now: @escaping () -> Date = Date.init
     ) {
-        self.privacyGuard = privacyGuard
-        self.messageFactory = messageFactory
-        self.providerConfigLoader = providerConfigLoader
         self.apiKeyStore = apiKeyStore
         self.llmProvider = llmProvider
         self.responseCache = responseCache
+        self.responseCacheKeyFactory = responseCacheKeyFactory
         self.parser = parser
         self.now = now
     }
 
-    func run(_ request: AgentRunRequest) async throws -> [AgentCorrectionResult] {
-        let sanitizedRequest = try privacyGuard.validateAndRedact(request)
-        let providerConfigs = try providerConfigLoader.loadProviders()
-        let providersByID = Dictionary(
-            providerConfigs.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-
-        var results: [AgentCorrectionResult] = []
-        for bundle in messageFactory.makeBundles(for: sanitizedRequest) {
-            try Task.checkCancellation()
-            results.append(try await correctionResult(for: bundle, providersByID: providersByID))
-        }
-
-        return results
-    }
-
-    private func correctionResult(
+    func correctionResult(
         for bundle: AgentMessageBundle,
         providersByID: [UUID: LLMProviderConfig]
     ) async throws -> AgentCorrectionResult {
@@ -97,11 +81,12 @@ struct CorrectionEngine {
             return failedResult(for: bundle, failure: .missingProvider(providerID: bundle.providerID))
         }
 
-        if let cachedRawResponse = try? responseCache.cachedRawResponse(
-            for: bundle,
-            provider: providerConfig,
-            now: now()
-        ),
+        let cacheKey = try? responseCacheKeyFactory.cacheKey(for: bundle, provider: providerConfig)
+        if let cacheKey,
+           let cachedRawResponse = try? responseCache.cachedRawResponse(
+               forCacheKey: cacheKey,
+               now: now()
+           ),
            let cachedResult = parsedResult(
                rawResponse: cachedRawResponse,
                for: bundle
@@ -143,12 +128,13 @@ struct CorrectionEngine {
             return failedResult(for: bundle, failure: .parseFailed(providerID: bundle.providerID))
         }
 
-        try? responseCache.storeRawResponse(
-            rawResponse,
-            for: bundle,
-            provider: providerConfig,
-            now: now()
-        )
+        if let cacheKey {
+            try? responseCache.storeRawResponse(
+                rawResponse,
+                forCacheKey: cacheKey,
+                now: now()
+            )
+        }
         return result
     }
 
@@ -190,5 +176,56 @@ struct CorrectionEngine {
         }
 
         return SafeLogger.redacted(String(describing: error))
+    }
+}
+
+struct CorrectionEngine {
+    private let privacyGuard: PrivacyGuard
+    private let messageFactory: AgentMessageFactory
+    private let providerConfigLoader: any LLMProviderConfigLoading
+    private let runtime: any AgentCorrectionRuntime
+
+    init(
+        providerConfigLoader: any LLMProviderConfigLoading,
+        apiKeyStore: any LLMProviderAPIKeyStoring,
+        llmProvider: any LLMProvider,
+        responseCache: any LLMResponseCaching = NoopLLMResponseCache(),
+        privacyGuard: PrivacyGuard = PrivacyGuard(),
+        messageFactory: AgentMessageFactory = AgentMessageFactory(),
+        parser: CorrectionResultParser = CorrectionResultParser(),
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.privacyGuard = privacyGuard
+        self.messageFactory = messageFactory
+        self.providerConfigLoader = providerConfigLoader
+        self.runtime = LLMProviderCorrectionRuntime(
+            apiKeyStore: apiKeyStore,
+            llmProvider: llmProvider,
+            responseCache: responseCache,
+            parser: parser,
+            now: now
+        )
+    }
+
+    func run(_ request: AgentRunRequest) async throws -> [AgentCorrectionResult] {
+        let sanitizedRequest = try privacyGuard.validateAndRedact(request)
+        let providerConfigs = try providerConfigLoader.loadProviders()
+        let providersByID = Dictionary(
+            providerConfigs.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var results: [AgentCorrectionResult] = []
+        for bundle in messageFactory.makeBundles(for: sanitizedRequest) {
+            try Task.checkCancellation()
+            results.append(
+                try await runtime.correctionResult(
+                    for: bundle,
+                    providersByID: providersByID
+                )
+            )
+        }
+
+        return results
     }
 }

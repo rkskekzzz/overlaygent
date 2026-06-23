@@ -5,6 +5,22 @@ protocol EditApplier {
     func apply(_ edit: CorrectionEdit, to snapshot: TextSnapshot) throws -> EditApplicationPlan
 }
 
+extension EditApplier {
+    @discardableResult
+    func apply(_ edits: [CorrectionEdit], to snapshot: TextSnapshot) throws -> [EditApplicationPlan] {
+        var currentSnapshot = snapshot
+        var plans: [EditApplicationPlan] = []
+
+        for edit in edits {
+            let plan = try apply(edit, to: currentSnapshot)
+            plans.append(plan)
+            currentSnapshot.text = plan.resultingText
+        }
+
+        return plans
+    }
+}
+
 enum EditApplicationPlanningError: Error, Equatable, CustomStringConvertible {
     case invalidRange(start: Int, end: Int, textLength: Int)
     case staleOriginal(range: Range<Int>, expected: String, actual: String)

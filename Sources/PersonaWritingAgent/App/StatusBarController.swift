@@ -11,26 +11,20 @@ final class StatusBarController: NSObject {
     struct Actions {
         var runActiveAgents: ([String]) -> Void
         var setAgentActive: (AgentProfile.ID, Bool) -> Void
-        var setCurrentAppEnabled: (Bool) -> Void
         var openDashboard: () -> Void
-        var openPermissions: () -> Void
         var openDiagnostics: () -> Void
         var quit: () -> Void
 
         init(
             runActiveAgents: @escaping ([String]) -> Void = { _ in },
             setAgentActive: @escaping (AgentProfile.ID, Bool) -> Void = { _, _ in },
-            setCurrentAppEnabled: @escaping (Bool) -> Void = { _ in },
             openDashboard: @escaping () -> Void = {},
-            openPermissions: @escaping () -> Void = {},
             openDiagnostics: @escaping () -> Void = {},
             quit: @escaping () -> Void = {}
         ) {
             self.runActiveAgents = runActiveAgents
             self.setAgentActive = setAgentActive
-            self.setCurrentAppEnabled = setCurrentAppEnabled
             self.openDashboard = openDashboard
-            self.openPermissions = openPermissions
             self.openDiagnostics = openDiagnostics
             self.quit = quit
         }
@@ -61,12 +55,8 @@ final class StatusBarController: NSObject {
 
     private enum MenuTitle {
         static let runActiveAgents = "Run Active Agents"
-        static let activeAgents = "Active Agents"
         static let emptyActiveAgents = "No active agents configured"
-        static let enableForCurrentApp = "Enable for Current App"
-        static let disableForCurrentApp = "Disable for Current App"
         static let openDashboard = "Open Dashboard"
-        static let permissions = "Permissions"
         static let diagnostics = "Diagnostics"
         static let quit = "Quit"
     }
@@ -75,25 +65,21 @@ final class StatusBarController: NSObject {
     private let removeStatusItem: () -> Void
     private let actions: Actions
     private var activeAgentEntries: [ActiveAgentEntry]
-    private var currentAppToggleItem: NSMenuItem?
 
     private(set) var menu: NSMenu
-    private(set) var isCurrentAppEnabled: Bool
 
     convenience init(
         actions: Actions = .placeholder,
-        activeAgentEntries: [ActiveAgentEntry] = [],
-        isCurrentAppEnabled: Bool = true
+        activeAgentEntries: [ActiveAgentEntry] = []
     ) {
-        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.init(
             statusItem: statusItem,
             removeStatusItem: {
                 NSStatusBar.system.removeStatusItem(statusItem)
             },
             actions: actions,
-            activeAgentEntries: activeAgentEntries,
-            isCurrentAppEnabled: isCurrentAppEnabled
+            activeAgentEntries: activeAgentEntries
         )
     }
 
@@ -101,14 +87,12 @@ final class StatusBarController: NSObject {
         statusItem: StatusItemProviding,
         removeStatusItem: @escaping () -> Void = {},
         actions: Actions = .placeholder,
-        activeAgentEntries: [ActiveAgentEntry] = [],
-        isCurrentAppEnabled: Bool = true
+        activeAgentEntries: [ActiveAgentEntry] = []
     ) {
         self.statusItem = statusItem
         self.removeStatusItem = removeStatusItem
         self.actions = actions
         self.activeAgentEntries = activeAgentEntries
-        self.isCurrentAppEnabled = isCurrentAppEnabled
         self.menu = NSMenu()
 
         super.init()
@@ -137,6 +121,7 @@ final class StatusBarController: NSObject {
                 image.isTemplate = true
                 button.image = image
                 button.imagePosition = .imageOnly
+                button.imageScaling = .scaleProportionallyDown
             } else {
                 button.title = "PWA"
             }
@@ -149,10 +134,6 @@ final class StatusBarController: NSObject {
 
         menu.addItem(makeMenuItem(title: MenuTitle.runActiveAgents, action: #selector(runActiveAgents(_:))))
         menu.addItem(.separator())
-
-        let activeAgentsHeader = NSMenuItem(title: MenuTitle.activeAgents, action: nil, keyEquivalent: "")
-        activeAgentsHeader.isEnabled = false
-        menu.addItem(activeAgentsHeader)
 
         if activeAgentEntries.isEmpty {
             let placeholder = NSMenuItem(title: MenuTitle.emptyActiveAgents, action: nil, keyEquivalent: "")
@@ -172,16 +153,7 @@ final class StatusBarController: NSObject {
         }
 
         menu.addItem(.separator())
-
-        let currentAppToggle = makeMenuItem(
-            title: currentAppToggleTitle,
-            action: #selector(toggleCurrentAppEnabled(_:))
-        )
-        currentAppToggleItem = currentAppToggle
-        menu.addItem(currentAppToggle)
-
         menu.addItem(makeMenuItem(title: MenuTitle.openDashboard, action: #selector(openDashboard(_:))))
-        menu.addItem(makeMenuItem(title: MenuTitle.permissions, action: #selector(openPermissions(_:))))
         menu.addItem(makeMenuItem(title: MenuTitle.diagnostics, action: #selector(openDiagnostics(_:))))
         menu.addItem(.separator())
         menu.addItem(makeMenuItem(title: MenuTitle.quit, action: #selector(quit(_:)), keyEquivalent: "q"))
@@ -199,10 +171,6 @@ final class StatusBarController: NSObject {
         item.target = self
         item.isEnabled = true
         return item
-    }
-
-    private var currentAppToggleTitle: String {
-        isCurrentAppEnabled ? MenuTitle.disableForCurrentApp : MenuTitle.enableForCurrentApp
     }
 
     @objc private func runActiveAgents(_ sender: NSMenuItem) {
@@ -226,18 +194,8 @@ final class StatusBarController: NSObject {
         actions.setAgentActive(id, isActive)
     }
 
-    @objc private func toggleCurrentAppEnabled(_ sender: NSMenuItem) {
-        isCurrentAppEnabled.toggle()
-        currentAppToggleItem?.title = currentAppToggleTitle
-        actions.setCurrentAppEnabled(isCurrentAppEnabled)
-    }
-
     @objc private func openDashboard(_ sender: NSMenuItem) {
         actions.openDashboard()
-    }
-
-    @objc private func openPermissions(_ sender: NSMenuItem) {
-        actions.openPermissions()
     }
 
     @objc private func openDiagnostics(_ sender: NSMenuItem) {

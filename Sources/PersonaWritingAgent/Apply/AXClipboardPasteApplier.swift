@@ -43,15 +43,15 @@ struct AXClipboardPasteApplier: EditApplier {
         }
 
         let plan = try planner.plan(for: edit, in: snapshot)
-        try selectionWriter.setSelectedTextRange(plan.textRange, on: element)
+        let processID = focusRestorer.restoreFocus(to: element)
+        if focusSettleDelay > 0 {
+            sleeper(focusSettleDelay)
+        }
 
+        try selectionWriter.setSelectedTextRange(plan.textRange, on: element)
         let previousClipboard = try clipboardWriter.snapshot()
         do {
             try clipboardWriter.setString(plan.replacement)
-            let processID = focusRestorer.restoreFocus(to: element)
-            if focusSettleDelay > 0 {
-                sleeper(focusSettleDelay)
-            }
             try pasteEventSender.sendPasteEvent(toProcessID: processID)
             if restoreDelay > 0 {
                 sleeper(restoreDelay)

@@ -67,7 +67,7 @@ struct SuggestionApplyOutcome: Equatable {
 
 protocol SuggestionApplyCoordinating {
     func apply(
-        _ suggestion: AgentSuggestionDisplayModel,
+        _ suggestion: AgentSuggestion,
         preparedRequest: AgentRunPreparedRequest
     ) -> SuggestionApplyOutcome
 }
@@ -80,7 +80,7 @@ struct SuggestionApplyCoordinator: SuggestionApplyCoordinating {
     }
 
     func apply(
-        _ suggestion: AgentSuggestionDisplayModel,
+        _ suggestion: AgentSuggestion,
         preparedRequest: AgentRunPreparedRequest
     ) -> SuggestionApplyOutcome {
         guard let agent = preparedRequest.request.activeAgents.first(where: { $0.id == suggestion.id }) else {
@@ -91,7 +91,7 @@ struct SuggestionApplyCoordinator: SuggestionApplyCoordinating {
             return failureOutcome(.focusedElementMissing, suggestion: suggestion, applyMode: agent.applyMode)
         }
 
-        guard let edit = editToApply(from: suggestion, input: preparedRequest.request.input) else {
+        guard let edits = editsToApply(from: suggestion, input: preparedRequest.request.input) else {
             return failureOutcome(.noEdits, suggestion: suggestion, applyMode: agent.applyMode)
         }
 
@@ -107,12 +107,12 @@ struct SuggestionApplyCoordinator: SuggestionApplyCoordinating {
             didCreateApplier = true
 
             do {
-                let plan = try applier.apply(edit, to: preparedRequest.request.input)
+                let plans = try applier.apply(edits, to: preparedRequest.request.input)
                 return SuggestionApplyOutcome(
                     suggestionID: suggestion.id,
                     agentID: suggestion.id,
                     applyMode: applyMode,
-                    appliedPlans: [plan],
+                    appliedPlans: plans,
                     failure: nil
                 )
             } catch {
@@ -127,12 +127,13 @@ struct SuggestionApplyCoordinator: SuggestionApplyCoordinating {
         )
     }
 
-    private func editToApply(
-        from suggestion: AgentSuggestionDisplayModel,
+    private func editsToApply(
+        from suggestion: AgentSuggestion,
         input: TextSnapshot
-    ) -> CorrectionEdit? {
-        if suggestion.edits.count == 1 {
-            return suggestion.edits[0]
+    ) -> [CorrectionEdit]? {
+        let granularEdits = nonOverlappingGranularEdits(from: suggestion.edits)
+        if granularEdits.isEmpty == false {
+            return granularEdits
         }
 
         guard let fullRewrite = suggestion.fullRewrite?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -141,13 +142,38 @@ struct SuggestionApplyCoordinator: SuggestionApplyCoordinating {
             return nil
         }
 
-        return CorrectionEdit(
+        return [CorrectionEdit(
             rangeStart: 0,
             rangeEnd: input.text.count,
             original: input.text,
             replacement: fullRewrite,
             reason: "Apply full rewrite"
-        )
+        )]
+    }
+
+    private func nonOverlappingGranularEdits(from edits: [CorrectionEdit]) -> [CorrectionEdit] {
+        let sortedEdits = edits.sorted { lhs, rhs in
+            if lhs.rangeStart == rhs.rangeStart {
+                return lhs.rangeEnd > rhs.rangeEnd
+            }
+
+            return lhs.rangeStart > rhs.rangeStart
+        }
+
+        var lowerBoundOfPreviouslyAppliedEdit = Int.max
+        var nonOverlappingEdits: [CorrectionEdit] = []
+        for edit in sortedEdits {
+            guard edit.rangeStart >= 0,
+                  edit.rangeEnd >= edit.rangeStart,
+                  edit.rangeEnd <= lowerBoundOfPreviouslyAppliedEdit else {
+                return []
+            }
+
+            lowerBoundOfPreviouslyAppliedEdit = edit.rangeStart
+            nonOverlappingEdits.append(edit)
+        }
+
+        return nonOverlappingEdits
     }
 
     private func applyModes(
@@ -168,7 +194,7 @@ struct SuggestionApplyCoordinator: SuggestionApplyCoordinating {
 
     private func failureOutcome(
         _ failure: SuggestionApplyFailure,
-        suggestion: AgentSuggestionDisplayModel,
+        suggestion: AgentSuggestion,
         applyMode: ApplyMode?
     ) -> SuggestionApplyOutcome {
         SuggestionApplyOutcome(

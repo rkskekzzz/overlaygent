@@ -55,7 +55,7 @@ Result: build passed, focused parser/provider/engine tests passed
 
 The current MVP is a SwiftPM/AppKit menu bar prototype with:
 
-- menu bar agent toggles and `Control + Command + F` run command
+- menu bar agent toggles and `Control + Command + O` run command
 - provider and persona dashboard screens
 - Accessibility-based focused text snapshots with secure-field rejection
 - OpenAI-compatible mocked provider pipeline and structured correction parsing

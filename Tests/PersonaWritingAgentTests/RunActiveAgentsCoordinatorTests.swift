@@ -35,7 +35,7 @@ final class RunActiveAgentsCoordinatorTests: XCTestCase {
         XCTAssertEqual(overlay.presentedStatusTitles, ["Running agents"])
         XCTAssertEqual(overlay.presentedAnchor, anchor)
         XCTAssertEqual(overlay.presentedSuggestions, [
-            AgentSuggestionDisplayModel(
+            AgentSuggestion(
                 id: successfulResult.agentID,
                 agentName: successfulResult.agentName,
                 result: successfulResult.result!
@@ -443,12 +443,12 @@ private final class RecordingCorrectionEngine: ActiveAgentCorrectionRunning {
 private final class RecordingSuggestionPresenter: ActiveAgentSuggestionPresenting {
     private(set) var showCallCount = 0
     private(set) var presentedAnchor: OverlayAnchorGeometry?
-    private(set) var presentedSuggestions: [AgentSuggestionDisplayModel] = []
+    private(set) var presentedSuggestions: [AgentSuggestion] = []
     private(set) var presentedStatusTitle: String?
     private(set) var presentedStatusDetail: String?
     private(set) var presentedStatusTitles: [String] = []
-    private(set) var onApply: ((AgentSuggestionDisplayModel) -> Bool)?
-    private(set) var onDismiss: ((AgentSuggestionDisplayModel?) -> Void)?
+    private(set) var onApply: ((AgentSuggestion) -> Bool)?
+    private(set) var onDismiss: ((AgentSuggestion?) -> Void)?
 
     func showStatus(
         anchor: OverlayAnchorGeometry,
@@ -469,9 +469,9 @@ private final class RecordingSuggestionPresenter: ActiveAgentSuggestionPresentin
 
     func showSuggestions(
         anchor: OverlayAnchorGeometry,
-        suggestions: [AgentSuggestionDisplayModel],
-        onApply: @escaping (AgentSuggestionDisplayModel) -> Bool,
-        onDismiss: @escaping (AgentSuggestionDisplayModel?) -> Void
+        suggestions: [AgentSuggestion],
+        onApply: @escaping (AgentSuggestion) -> Bool,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
     ) -> OverlayPanelPlacement {
         showCallCount += 1
         presentedAnchor = anchor
@@ -487,12 +487,12 @@ private final class RecordingSuggestionPresenter: ActiveAgentSuggestionPresentin
 }
 
 private final class RecordingSuggestionApplyCoordinator: SuggestionApplyCoordinating {
-    private(set) var appliedSuggestions: [AgentSuggestionDisplayModel] = []
+    private(set) var appliedSuggestions: [AgentSuggestion] = []
     private(set) var preparedRequests: [AgentRunPreparedRequest] = []
     var failure: SuggestionApplyFailure?
 
     func apply(
-        _ suggestion: AgentSuggestionDisplayModel,
+        _ suggestion: AgentSuggestion,
         preparedRequest: AgentRunPreparedRequest
     ) -> SuggestionApplyOutcome {
         appliedSuggestions.append(suggestion)

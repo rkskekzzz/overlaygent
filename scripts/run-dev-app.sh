@@ -3,12 +3,26 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$("$ROOT_DIR/scripts/build-dev-app.sh" | tail -n 1)"
+APP_EXEC="$APP_DIR/Contents/MacOS/PersonaWritingAgent"
 
 launchctl remove PersonaWritingAgentDev 2>/dev/null || true
 pkill -x PersonaWritingAgent 2>/dev/null || true
 
 open -n "$APP_DIR"
-sleep 2
 
-pgrep -fl PersonaWritingAgent || true
-codesign -dv --verbose=2 "$APP_DIR" 2>&1 | sed -n '1,18p'
+APP_PID=""
+for _ in {1..20}; do
+  APP_PID="$(pgrep -f "$APP_EXEC" | head -n 1 || true)"
+  if [[ -n "$APP_PID" ]]; then
+    break
+  fi
+  sleep 0.25
+done
+
+if [[ -z "$APP_PID" ]]; then
+  echo "PersonaWritingAgent failed to stay running after launch." >&2
+  exit 1
+fi
+
+echo "$APP_PID $APP_EXEC"
+codesign -dv --verbose=2 "$APP_EXEC" 2>&1 | sed -n '1,18p'

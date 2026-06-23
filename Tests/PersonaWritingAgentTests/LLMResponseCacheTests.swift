@@ -17,16 +17,14 @@ final class LLMResponseCacheTests: XCTestCase {
 
     func testSQLiteCacheStoresAndReadsRawResponseBeforeExpiration() throws {
         let cache = makeCache(ttl: 30 * 24 * 60 * 60)
-        let bundle = messageBundle(input: "Can we make deploy?")
-        let provider = providerConfig(defaultModel: "gpt-cache")
+        let cacheKey = "cache-key-before-expiration"
         let now = Date(timeIntervalSince1970: 1_000)
         let rawResponse = #"{"summary":null,"edits":[],"fullRewrite":"Can we deploy?"}"#
 
-        try cache.storeRawResponse(rawResponse, for: bundle, provider: provider, now: now)
+        try cache.storeRawResponse(rawResponse, forCacheKey: cacheKey, now: now)
 
         let cachedResponse = try cache.cachedRawResponse(
-            for: bundle,
-            provider: provider,
+            forCacheKey: cacheKey,
             now: now.addingTimeInterval(60)
         )
 
@@ -35,15 +33,13 @@ final class LLMResponseCacheTests: XCTestCase {
 
     func testSQLiteCacheReturnsNilAndRemovesEntryAfterExpiration() throws {
         let cache = makeCache(ttl: 10)
-        let bundle = messageBundle(input: "Expired input")
-        let provider = providerConfig()
+        let cacheKey = "expired-cache-key"
         let now = Date(timeIntervalSince1970: 2_000)
 
-        try cache.storeRawResponse("expired", for: bundle, provider: provider, now: now)
+        try cache.storeRawResponse("expired", forCacheKey: cacheKey, now: now)
 
         let expiredResponse = try cache.cachedRawResponse(
-            for: bundle,
-            provider: provider,
+            forCacheKey: cacheKey,
             now: now.addingTimeInterval(11)
         )
 

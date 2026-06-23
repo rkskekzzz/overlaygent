@@ -40,14 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 setAgentActive: { [weak self] id, isActive in
                     self?.setAgentActive(id: id, isActive: isActive)
                 },
-                setCurrentAppEnabled: { [weak self] isEnabled in
-                    self?.setCurrentAppEnabled(isEnabled)
-                },
                 openDashboard: { [weak self] in
                     self?.openDashboard()
-                },
-                openPermissions: { [weak self] in
-                    self?.openPermissions()
                 },
                 openDiagnostics: { [weak self] in
                     self?.openDiagnostics()
@@ -211,21 +205,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func setCurrentAppEnabled(_ isEnabled: Bool) {
-        let stateDescription = isEnabled ? "enabled" : "disabled"
-        logger.log("Current app writing assistance is now \(stateDescription); app rules persistence is not implemented yet.")
-    }
-
     private func openDashboard() {
         dashboardWindowController.showWindow(nil)
-    }
-
-    private func openPermissions() {
-        let state = permissionCoordinator.requestAccessibilityPermissionPrompt()
-
-        if state.requiresUserAction {
-            _ = permissionCoordinator.openAccessibilitySettings()
-        }
     }
 
     private func openDiagnostics() {

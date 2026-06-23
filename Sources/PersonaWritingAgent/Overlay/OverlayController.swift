@@ -151,7 +151,9 @@ struct OverlayPositioning {
 
         let proposedX: CGFloat
         switch resolvedAnchor.source {
-        case .input, .caret, .fallback, .defaultScreen:
+        case .input:
+            proposedX = resolvedAnchor.rect.minX
+        case .caret, .fallback, .defaultScreen:
             proposedX = resolvedAnchor.rect.midX - (panelSize.width / 2)
         }
         let belowY = resolvedAnchor.rect.minY - spacing - panelSize.height
@@ -184,8 +186,10 @@ struct OverlayPositioning {
     }
 
     private func clampedPanelSize(_ size: CGSize, in visibleFrame: CGRect) -> CGSize {
-        let width = clampedLength(size.width, fallback: defaultPanelSize.width, maximum: visibleFrame.width)
-        let height = clampedLength(size.height, fallback: defaultPanelSize.height, maximum: visibleFrame.height)
+        let maxWidth = max(1, visibleFrame.width - (screenPadding * 2))
+        let maxHeight = max(1, visibleFrame.height - (screenPadding * 2))
+        let width = clampedLength(size.width, fallback: defaultPanelSize.width, maximum: maxWidth)
+        let height = clampedLength(size.height, fallback: defaultPanelSize.height, maximum: maxHeight)
         return CGSize(width: width, height: height)
     }
 
@@ -217,21 +221,20 @@ protocol SuggestionPanelPresenting: AnyObject {
 
     func setPlaceholder(title: String, detail: String)
     func setSuggestions(
-        _ suggestions: [AgentSuggestionDisplayModel],
-        onApply: @escaping (AgentSuggestionDisplayModel) -> Bool,
-        onDismiss: @escaping (AgentSuggestionDisplayModel?) -> Void
+        _ suggestions: [AgentSuggestion],
+        onApply: @escaping (AgentSuggestion) -> Bool,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
     )
     func show(frame: CGRect)
     func hide()
 }
 
 enum AgentSuggestionOverlayLayout {
-    static let preferredContentSize = CGSize(width: 380, height: 224)
+    static let preferredContentSize = CGSize(width: 420, height: 260)
 }
 
 enum AgentStatusOverlayLayout {
     static let preferredContentSize = AgentSuggestionOverlayLayout.preferredContentSize
-    static let contentWidth: CGFloat = 294
 }
 
 final class OverlayController {
@@ -285,14 +288,14 @@ final class OverlayController {
     @discardableResult
     func showSuggestions(
         anchor: OverlayAnchorGeometry,
-        suggestions: [AgentSuggestionDisplayModel],
-        onApply: @escaping (AgentSuggestionDisplayModel) -> Bool,
-        onDismiss: @escaping (AgentSuggestionDisplayModel?) -> Void
+        suggestions: [AgentSuggestion],
+        onApply: @escaping (AgentSuggestion) -> Bool,
+        onDismiss: @escaping (AgentSuggestion?) -> Void
     ) -> OverlayPanelPlacement {
         let visibleFrame = visibleFrameProvider(anchor.preferredScreenRect())
         let placement = positioner.placement(
             for: anchor,
-            panelSize: AgentSuggestionOverlayLayout.preferredContentSize,
+            panelSize: panelController.preferredContentSize,
             visibleFrame: visibleFrame
         )
 

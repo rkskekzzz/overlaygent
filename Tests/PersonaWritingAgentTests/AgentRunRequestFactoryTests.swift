@@ -163,6 +163,71 @@ final class AgentRunRequestFactoryTests: XCTestCase {
         )
     }
 
+    func testMakeRequestUsesOrchestratorSelectionFromActiveEnabledCandidates() throws {
+        let snapshot = textSnapshot(sourceBundleID: "com.microsoft.VSCode")
+        let grammar = agent(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000721")!,
+            name: "Grammar Fixer",
+            isEnabled: true,
+            isActive: true
+        )
+        let codingTerms = agent(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000722")!,
+            name: "Coding Terms",
+            isEnabled: true,
+            isActive: true
+        )
+        let disabledActiveAgent = agent(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000723")!,
+            name: "Disabled Active",
+            isEnabled: false,
+            isActive: true
+        )
+        let enabledInactiveAgent = agent(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000724")!,
+            name: "Enabled Inactive",
+            isEnabled: true,
+            isActive: false
+        )
+        let orchestrator = RecordingAgentOrchestrator(selectedAgentIDs: [codingTerms.id])
+        let factory = AgentRunRequestFactory(
+            textSession: FakeInputCapturer(snapshot: snapshot),
+            agentProfileStore: FakeAgentProfileLoader(
+                profiles: [grammar, codingTerms, disabledActiveAgent, enabledInactiveAgent]
+            ),
+            memoryStore: FakeAgentMemoryLoader(memory: AgentMemoryStore.defaultMemory()),
+            contextResolver: RecordingContextResolver(result: nil),
+            orchestrator: orchestrator
+        )
+
+        let request = try factory.makeRequest()
+
+        XCTAssertEqual(request.activeAgents, [codingTerms])
+        XCTAssertEqual(orchestrator.candidateNames, [["Grammar Fixer", "Coding Terms"]])
+        XCTAssertEqual(orchestrator.contexts.map(\.input), [snapshot])
+    }
+
+    func testMakeRequestThrowsWhenOrchestratorSelectsNoAgents() {
+        let snapshot = textSnapshot(sourceBundleID: "com.tinyspeck.slackmacgap")
+        let inputCapturer = FakeInputCapturer(snapshot: snapshot)
+        let memoryLoader = FakeAgentMemoryLoader(memory: AgentMemoryStore.defaultMemory())
+        let factory = AgentRunRequestFactory(
+            textSession: inputCapturer,
+            agentProfileStore: FakeAgentProfileLoader(
+                profiles: [agent(isEnabled: true, isActive: true)]
+            ),
+            memoryStore: memoryLoader,
+            contextResolver: RecordingContextResolver(result: nil),
+            orchestrator: RecordingAgentOrchestrator(selectedAgentIDs: [])
+        )
+
+        XCTAssertThrowsError(try factory.makeRequest()) { error in
+            XCTAssertEqual(error as? AgentRunRequestFactoryError, .noSelectedAgents)
+        }
+        XCTAssertEqual(inputCapturer.callCount, 1)
+        XCTAssertEqual(memoryLoader.callCount, 1)
+    }
+
     func testMakeRequestThrowsWhenNoActiveEnabledAgents() {
         let inputCapturer = FakeInputCapturer(snapshot: textSnapshot(sourceBundleID: "com.example.App"))
         let memoryLoader = FakeAgentMemoryLoader(memory: AgentMemoryStore.defaultMemory())
@@ -335,5 +400,27 @@ private final class RecordingContextResolver: AgentRunContextResolving {
     func context(for request: AppContextExtractionRequest) -> ConversationContext? {
         requests.append(request)
         return result
+    }
+}
+
+private final class RecordingAgentOrchestrator: AgentOrchestrating {
+    private let selectedAgentIDs: [AgentProfile.ID]
+    private(set) var candidateNames: [[String]] = []
+    private(set) var contexts: [AgentOrchestrationContext] = []
+
+    init(selectedAgentIDs: [AgentProfile.ID]) {
+        self.selectedAgentIDs = selectedAgentIDs
+    }
+
+    func selectAgents(
+        from candidates: [AgentProfile],
+        context: AgentOrchestrationContext
+    ) -> [AgentProfile] {
+        candidateNames.append(candidates.map(\.name))
+        contexts.append(context)
+
+        return selectedAgentIDs.compactMap { id in
+            candidates.first { $0.id == id }
+        }
     }
 }

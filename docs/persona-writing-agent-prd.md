@@ -620,19 +620,31 @@ AgentMessageAssembly/
   AgentRunRequestFactory.swift
   ContextBudgeter.swift
 
+AgentOrchestration/
+  AgentOrchestrator.swift
+
 Memory/
   AgentMemoryStore.swift
 
 Correction/
-  ContextRedactor.swift
+  AgentSuggestion.swift
   CorrectionEngine.swift
   CorrectionResultParser.swift
   LLMProvider.swift
+  LLMResponseCaching.swift
+  LLMResponseCacheKeyFactory.swift
   OpenAICompatibleProvider.swift
   PrivacyGuard.swift
 
 Logging/
   SafeLogger.swift
+
+Shared/
+  ContextRedactor.swift
+
+Domain/
+  BundleIdentifier.swift
+  SharedDomainModels.swift
 
 Overlay/
   AgentResultPagerView.swift
@@ -652,7 +664,10 @@ Storage/
   DefaultSeedConfiguration.swift
   JSONFileStore.swift
   KeychainStore.swift
+  LLMProviderAPIKeyStoring.swift
   LLMProviderStore.swift
+  LLMResponseCache.swift
+  OrchestratorSettingsStore.swift
   SeededLLMProviderConfigLoader.swift
 
 Hotkeys/
@@ -667,10 +682,6 @@ Permissions/
 Compatibility/
   AppCompatibilityRegistry.swift
   KnownAppCatalog.swift
-
-Domain/
-  BundleIdentifier.swift
-  SharedDomainModels.swift
 ```
 
 ## 12. LLM Prompt 방향

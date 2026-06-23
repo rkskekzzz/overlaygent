@@ -14,29 +14,49 @@ struct AXSelectedTextApplier: EditApplier {
     private let element: AXElement
     private let writer: AXSelectedTextWriting
     private let valueReader: (any AXTextValueReading)?
+    private let focusRestorer: (any AXTextFocusRestoring)?
     private let planner: EditApplicationPlanner
+    private let focusSettleDelay: TimeInterval
+    private let sleeper: (TimeInterval) -> Void
 
     init(
         element: AXElement,
         writer: AXSelectedTextWriting = SystemAXSelectedTextWriter(),
         valueReader: (any AXTextValueReading)? = SystemAXTextValueReader(),
-        planner: EditApplicationPlanner = EditApplicationPlanner()
+        focusRestorer: (any AXTextFocusRestoring)? = SystemAXTextFocusRestorer(),
+        planner: EditApplicationPlanner = EditApplicationPlanner(),
+        focusSettleDelay: TimeInterval = 0.08,
+        sleeper: @escaping (TimeInterval) -> Void = Thread.sleep(forTimeInterval:)
     ) {
         self.element = element
         self.writer = writer
         self.valueReader = valueReader
+        self.focusRestorer = focusRestorer
         self.planner = planner
+        self.focusSettleDelay = focusSettleDelay
+        self.sleeper = sleeper
     }
 
     @discardableResult
     func apply(_ edit: CorrectionEdit, to snapshot: TextSnapshot) throws -> EditApplicationPlan {
         let plan = try planner.plan(for: edit, in: snapshot)
 
+        restoreFocusIfPossible()
         try writer.setSelectedTextRange(plan.textRange, on: element)
         try writer.replaceSelectedText(with: plan.replacement, on: element)
         try verifyAppliedPlan(plan)
 
         return plan
+    }
+
+    private func restoreFocusIfPossible() {
+        guard let processID = focusRestorer?.restoreFocus(to: element),
+              processID > 0,
+              focusSettleDelay > 0 else {
+            return
+        }
+
+        sleeper(focusSettleDelay)
     }
 
     private func verifyAppliedPlan(_ plan: EditApplicationPlan) throws {

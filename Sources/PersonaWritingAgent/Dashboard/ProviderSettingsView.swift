@@ -21,7 +21,6 @@ struct ProviderSettingsView: View {
     var body: some View {
         NavigationStack(path: $path) {
             overview
-                .navigationTitle("LLM Provider")
                 .toolbar {
                     ToolbarItem {
                         Button {

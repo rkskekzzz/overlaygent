@@ -7,6 +7,9 @@ final class AppEnvironmentTests: XCTestCase {
 
         XCTAssertTrue(environment.dashboardDependencies.agentProfileStore === environment.agentProfileStore)
         XCTAssertEqual(environment.dashboardDependencies.llmProviderStore.fileURL, environment.llmProviderStore.fileURL)
+        XCTAssertTrue(
+            environment.dashboardDependencies.orchestratorSettingsStore === environment.orchestratorSettingsStore
+        )
         XCTAssertEqual(environment.memoryStore.fileURL, AgentMemoryStore.defaultFileURL())
 
         let appKeychainStore = try XCTUnwrap(environment.apiKeyStore as? KeychainStore)

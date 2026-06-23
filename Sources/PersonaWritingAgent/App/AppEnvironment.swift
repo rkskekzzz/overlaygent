@@ -9,6 +9,7 @@ struct AppEnvironment {
 
     var agentProfileStore: AgentProfileStore
     var llmProviderStore: LLMProviderStore
+    var orchestratorSettingsStore: OrchestratorSettingsStore
     var memoryStore: AgentMemoryStore
     var apiKeyStore: any LLMProviderAPIKeyStoring
     var dashboardDependencies: DashboardDependencies
@@ -24,11 +25,13 @@ struct AppEnvironment {
     static func live() -> AppEnvironment {
         let agentProfileStore = AgentProfileStore.defaultStore
         let llmProviderStore = LLMProviderStore()
+        let orchestratorSettingsStore = OrchestratorSettingsStore.defaultStore
         let memoryStore = AgentMemoryStore.defaultStore
         let apiKeyStore = KeychainStore()
         let dashboardDependencies = DashboardDependencies(
             agentProfileStore: agentProfileStore,
             llmProviderStore: llmProviderStore,
+            orchestratorSettingsStore: orchestratorSettingsStore,
             apiKeyStore: apiKeyStore
         )
         let logger = SafeLogger.default
@@ -40,7 +43,11 @@ struct AppEnvironment {
             textSession: textSession,
             agentProfileStore: agentProfileStore,
             memoryStore: memoryStore,
-            contextResolver: AppContextAdapterRegistry()
+            contextResolver: AppContextAdapterRegistry(),
+            orchestrator: StoreBackedAgentOrchestrator(
+                settingsLoader: orchestratorSettingsStore,
+                logger: logger.log
+            )
         )
         let correctionEngine = CorrectionEngine(
             providerConfigLoader: SeededLLMProviderConfigLoader(providerStore: llmProviderStore),
@@ -63,6 +70,7 @@ struct AppEnvironment {
         return AppEnvironment(
             agentProfileStore: agentProfileStore,
             llmProviderStore: llmProviderStore,
+            orchestratorSettingsStore: orchestratorSettingsStore,
             memoryStore: memoryStore,
             apiKeyStore: apiKeyStore,
             dashboardDependencies: dashboardDependencies,

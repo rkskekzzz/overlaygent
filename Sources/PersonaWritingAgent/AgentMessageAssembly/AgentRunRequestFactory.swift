@@ -66,6 +66,7 @@ struct AgentRunPreparedRequest: Equatable {
 
 enum AgentRunRequestFactoryError: Error, Equatable {
     case noActiveEnabledAgents
+    case noSelectedAgents
 }
 
 struct AgentRunRequestFactory {
@@ -73,33 +74,34 @@ struct AgentRunRequestFactory {
     private let agentProfileStore: any AgentProfileLoading
     private let memoryStore: any AgentMemoryLoading
     private let contextResolver: any AgentRunContextResolving
+    private let orchestrator: any AgentOrchestrating
 
     init(
         textSession: any AgentRunInputCapturing,
         agentProfileStore: any AgentProfileLoading,
         memoryStore: any AgentMemoryLoading,
-        contextResolver: any AgentRunContextResolving
+        contextResolver: any AgentRunContextResolving,
+        orchestrator: any AgentOrchestrating = RuleBasedAgentOrchestrator()
     ) {
         self.textSession = textSession
         self.agentProfileStore = agentProfileStore
         self.memoryStore = memoryStore
         self.contextResolver = contextResolver
+        self.orchestrator = orchestrator
     }
 
     func makeRequest(
         focusedElement: AXFocusedElement? = nil,
         privacyOptions: AgentRunPrivacyOptions = AgentRunPrivacyOptions()
     ) throws -> AgentRunRequest {
-        let activeAgents = try agentProfileStore.loadProfiles().filter { profile in
-            profile.isActive && profile.isEnabled
-        }
-        guard activeAgents.isEmpty == false else {
+        let candidateAgents = try activeEnabledAgents()
+        guard candidateAgents.isEmpty == false else {
             throw AgentRunRequestFactoryError.noActiveEnabledAgents
         }
 
         let capture = try textSession.capture()
         return try makeRequest(
-            activeAgents: activeAgents,
+            candidateAgents: candidateAgents,
             capture: capture,
             focusedElement: focusedElement ?? capture.focusedElement,
             privacyOptions: privacyOptions
@@ -109,16 +111,14 @@ struct AgentRunRequestFactory {
     func makePreparedRequest(
         privacyOptions: AgentRunPrivacyOptions = AgentRunPrivacyOptions()
     ) throws -> AgentRunPreparedRequest {
-        let activeAgents = try agentProfileStore.loadProfiles().filter { profile in
-            profile.isActive && profile.isEnabled
-        }
-        guard activeAgents.isEmpty == false else {
+        let candidateAgents = try activeEnabledAgents()
+        guard candidateAgents.isEmpty == false else {
             throw AgentRunRequestFactoryError.noActiveEnabledAgents
         }
 
         let capture = try textSession.capture()
         let request = try makeRequest(
-            activeAgents: activeAgents,
+            candidateAgents: candidateAgents,
             capture: capture,
             focusedElement: capture.focusedElement,
             privacyOptions: privacyOptions
@@ -131,8 +131,14 @@ struct AgentRunRequestFactory {
         )
     }
 
+    private func activeEnabledAgents() throws -> [AgentProfile] {
+        try agentProfileStore.loadProfiles().filter { profile in
+            profile.isActive && profile.isEnabled
+        }
+    }
+
     private func makeRequest(
-        activeAgents: [AgentProfile],
+        candidateAgents: [AgentProfile],
         capture: FocusedTextCapture,
         focusedElement: AXFocusedElement?,
         privacyOptions: AgentRunPrivacyOptions
@@ -145,10 +151,21 @@ struct AgentRunRequestFactory {
             focusedElement: focusedElement,
             privacyPolicy: privacyPolicy
         )
+        let selectedAgents = orchestrator.selectAgents(
+            from: candidateAgents,
+            context: AgentOrchestrationContext(
+                input: snapshot,
+                appContext: appContext,
+                privacyPolicy: privacyPolicy
+            )
+        )
+        guard selectedAgents.isEmpty == false else {
+            throw AgentRunRequestFactoryError.noSelectedAgents
+        }
 
         return AgentRunRequest(
             input: snapshot,
-            activeAgents: activeAgents,
+            activeAgents: selectedAgents,
             appContext: appContext,
             memory: memory,
             privacyPolicy: privacyPolicy

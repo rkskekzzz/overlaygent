@@ -3,7 +3,7 @@ import XCTest
 @testable import PersonaWritingAgent
 
 final class StatusBarControllerTests: XCTestCase {
-    func testStatusMenuMatchesPRDShell() {
+    func testStatusMenuUsesCompactShell() {
         let statusItem = FakeStatusItem()
         let controller = StatusBarController(statusItem: statusItem)
 
@@ -13,18 +13,14 @@ final class StatusBarControllerTests: XCTestCase {
             [
                 "Run Active Agents",
                 "-",
-                "Active Agents",
                 "No active agents configured",
                 "-",
-                "Disable for Current App",
                 "Open Dashboard",
-                "Permissions",
                 "Diagnostics",
                 "-",
                 "Quit"
             ]
         )
-        XCTAssertFalse(controller.menu.item(withTitle: "Active Agents")?.isEnabled ?? true)
         XCTAssertFalse(controller.menu.item(withTitle: "No active agents configured")?.isEnabled ?? true)
     }
 
@@ -37,14 +33,8 @@ final class StatusBarControllerTests: XCTestCase {
                 runActiveAgents: { names in
                     events.append("run:\(names.joined(separator: ","))")
                 },
-                setCurrentAppEnabled: { isEnabled in
-                    events.append("current-app:\(isEnabled)")
-                },
                 openDashboard: {
                     events.append("dashboard")
-                },
-                openPermissions: {
-                    events.append("permissions")
                 },
                 openDiagnostics: {
                     events.append("diagnostics")
@@ -56,10 +46,7 @@ final class StatusBarControllerTests: XCTestCase {
         )
 
         selectMenuItem("Run Active Agents", in: controller.menu)
-        let currentAppToggle = controller.menu.item(withTitle: "Disable for Current App")
-        selectMenuItem("Disable for Current App", in: controller.menu)
         selectMenuItem("Open Dashboard", in: controller.menu)
-        selectMenuItem("Permissions", in: controller.menu)
         selectMenuItem("Diagnostics", in: controller.menu)
         selectMenuItem("Quit", in: controller.menu)
 
@@ -67,14 +54,11 @@ final class StatusBarControllerTests: XCTestCase {
             events,
             [
                 "run:",
-                "current-app:false",
                 "dashboard",
-                "permissions",
                 "diagnostics",
                 "quit"
             ]
         )
-        XCTAssertEqual(currentAppToggle?.title, "Enable for Current App")
     }
 
     func testActiveAgentEntriesReplacePlaceholderArea() {

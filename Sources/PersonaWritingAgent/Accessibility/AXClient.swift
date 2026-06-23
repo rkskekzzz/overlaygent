@@ -68,15 +68,19 @@ protocol AXCoordinateConverting {
 
 struct SystemAXCoordinateConverter: AXCoordinateConverting {
     func appKitRect(fromAXTopLeftRect rect: CGRect) -> CGRect {
+        Self.appKitRect(
+            fromAXTopLeftRect: rect,
+            screenFrames: NSScreen.screens.map(\.frame)
+        )
+    }
+
+    static func appKitRect(fromAXTopLeftRect rect: CGRect, screenFrames: [CGRect]) -> CGRect {
         let standardized = rect.standardized
-        let screens = NSScreen.screens
-        guard screens.isEmpty == false else {
+        guard screenFrames.isEmpty == false else {
             return standardized
         }
 
-        let desktopTopY = screens
-            .map(\.frame.maxY)
-            .max() ?? standardized.maxY
+        let desktopTopY = primaryScreenTopY(in: screenFrames)
 
         return CGRect(
             x: standardized.minX,
@@ -84,6 +88,14 @@ struct SystemAXCoordinateConverter: AXCoordinateConverting {
             width: standardized.width,
             height: standardized.height
         )
+    }
+
+    private static func primaryScreenTopY(in screenFrames: [CGRect]) -> CGFloat {
+        if let primaryFrame = screenFrames.first(where: { $0.minX == 0 && $0.minY == 0 }) {
+            return primaryFrame.maxY
+        }
+
+        return screenFrames[0].maxY
     }
 }
 

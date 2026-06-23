@@ -167,7 +167,7 @@ final class CorrectionEngineTests: XCTestCase {
 
         XCTAssertEqual(results.first?.result?.fullRewrite, "Fresh rewrite.")
         XCTAssertEqual(responseCache.storedResponses.map(\.rawResponse), [rawResponse])
-        XCTAssertEqual(responseCache.storedResponses.first?.provider.id, providerID)
+        XCTAssertEqual(responseCache.storedResponses.first?.cacheKey.isEmpty, false)
     }
 
     func testRunKeepsProcessingAfterPerAgentFailures() async throws {
@@ -436,15 +436,13 @@ private final class MockLLMProvider: LLMProvider {
 
 private final class FakeLLMResponseCache: LLMResponseCaching {
     struct Lookup {
-        var bundle: AgentMessageBundle
-        var provider: LLMProviderConfig
+        var cacheKey: String
         var now: Date
     }
 
     struct StoredResponse {
         var rawResponse: String
-        var bundle: AgentMessageBundle
-        var provider: LLMProviderConfig
+        var cacheKey: String
         var now: Date
     }
 
@@ -458,25 +456,22 @@ private final class FakeLLMResponseCache: LLMResponseCaching {
     }
 
     func cachedRawResponse(
-        for bundle: AgentMessageBundle,
-        provider: LLMProviderConfig,
+        forCacheKey cacheKey: String,
         now: Date
     ) throws -> String? {
-        cachedLookups.append(Lookup(bundle: bundle, provider: provider, now: now))
+        cachedLookups.append(Lookup(cacheKey: cacheKey, now: now))
         return cachedRawResponseValue
     }
 
     func storeRawResponse(
         _ rawResponse: String,
-        for bundle: AgentMessageBundle,
-        provider: LLMProviderConfig,
+        forCacheKey cacheKey: String,
         now: Date
     ) throws {
         storedResponses.append(
             StoredResponse(
                 rawResponse: rawResponse,
-                bundle: bundle,
-                provider: provider,
+                cacheKey: cacheKey,
                 now: now
             )
         )
