@@ -72,6 +72,136 @@ final class AXFocusedElementReaderTests: XCTestCase {
         XCTAssertNil(result.selectedRange)
     }
 
+    func testFocusedElementFallsBackToFrontmostApplicationWhenSystemWideFocusedElementFails() throws {
+        let systemWideElement = AXElement(FakeAXNode())
+        let applicationElement = AXElement(FakeAXNode())
+        let focusedElement = AXElement(FakeAXNode())
+        let reader = FakeAXAttributeReader(systemWideElement: systemWideElement)
+        reader.frontmostApplicationElementValue = applicationElement
+        reader.fail(
+            .attributeUnavailable(attribute: AXAttribute.focusedUIElement.name, code: -25204),
+            for: .focusedUIElement,
+            on: systemWideElement
+        )
+        reader.fail(
+            .attributeUnavailable(attribute: AXAttribute.focusedApplication.name, code: -25205),
+            for: .focusedApplication,
+            on: systemWideElement
+        )
+        reader.set(.element(focusedElement), for: .focusedUIElement, on: applicationElement)
+        reader.set(.string("AXTextArea"), for: .role, on: focusedElement)
+        reader.set(.string("Draft reply"), for: .value, on: focusedElement)
+        let client = AXClient(reader: reader)
+
+        let result = try client.focusedElement()
+
+        XCTAssertEqual(result.element, focusedElement)
+        XCTAssertEqual(result.role, "AXTextArea")
+        XCTAssertEqual(result.value, "Draft reply")
+        XCTAssertEqual(
+            reader.requests.map(\.attribute),
+            [
+                .focusedUIElement,
+                .focusedApplication,
+                .focusedUIElement,
+                .role,
+                .subrole,
+                .value,
+                .selectedTextRange,
+                .position
+            ]
+        )
+        XCTAssertEqual(reader.requests.map(\.element)[0], systemWideElement)
+        XCTAssertEqual(reader.requests.map(\.element)[1], systemWideElement)
+        XCTAssertEqual(reader.requests.map(\.element)[2], applicationElement)
+    }
+
+    func testFocusedElementPrefersAXFocusedApplicationFallbackWhenSystemWideFocusedElementFails() throws {
+        let systemWideElement = AXElement(FakeAXNode())
+        let focusedApplicationElement = AXElement(FakeAXNode())
+        let frontmostApplicationElement = AXElement(FakeAXNode())
+        let focusedElement = AXElement(FakeAXNode())
+        let reader = FakeAXAttributeReader(systemWideElement: systemWideElement)
+        reader.frontmostApplicationElementValue = frontmostApplicationElement
+        reader.fail(
+            .attributeUnavailable(attribute: AXAttribute.focusedUIElement.name, code: -25204),
+            for: .focusedUIElement,
+            on: systemWideElement
+        )
+        reader.set(.element(focusedApplicationElement), for: .focusedApplication, on: systemWideElement)
+        reader.set(.element(focusedElement), for: .focusedUIElement, on: focusedApplicationElement)
+        reader.set(.string("AXTextArea"), for: .role, on: focusedElement)
+        reader.set(.string("Focused app draft"), for: .value, on: focusedElement)
+        let client = AXClient(reader: reader)
+
+        let result = try client.focusedElement()
+
+        XCTAssertEqual(result.element, focusedElement)
+        XCTAssertEqual(result.value, "Focused app draft")
+        XCTAssertEqual(
+            reader.requests.map(\.attribute),
+            [
+                .focusedUIElement,
+                .focusedApplication,
+                .focusedUIElement,
+                .role,
+                .subrole,
+                .value,
+                .selectedTextRange,
+                .position
+            ]
+        )
+        XCTAssertEqual(reader.requests.map(\.element)[1], systemWideElement)
+        XCTAssertEqual(reader.requests.map(\.element)[2], focusedApplicationElement)
+        XCTAssertFalse(reader.requests.map(\.element).contains(frontmostApplicationElement))
+    }
+
+    func testFocusedElementFallsBackToFocusedWindowTextCandidateWhenApplicationFocusedElementFails() throws {
+        let systemWideElement = AXElement(FakeAXNode())
+        let applicationElement = AXElement(FakeAXNode())
+        let windowElement = AXElement(FakeAXNode())
+        let groupElement = AXElement(FakeAXNode())
+        let textElement = AXElement(FakeAXNode())
+        let reader = FakeAXAttributeReader(systemWideElement: systemWideElement)
+        reader.frontmostApplicationElementValue = applicationElement
+        reader.fail(
+            .attributeUnavailable(attribute: AXAttribute.focusedUIElement.name, code: -25204),
+            for: .focusedUIElement,
+            on: systemWideElement
+        )
+        reader.fail(
+            .attributeUnavailable(attribute: AXAttribute.focusedApplication.name, code: -25205),
+            for: .focusedApplication,
+            on: systemWideElement
+        )
+        reader.fail(
+            .attributeUnavailable(attribute: AXAttribute.focusedUIElement.name, code: -25212),
+            for: .focusedUIElement,
+            on: applicationElement
+        )
+        reader.set(.element(windowElement), for: .focusedWindow, on: applicationElement)
+        reader.set(.elements([groupElement]), for: .children, on: windowElement)
+        reader.set(.elements([textElement]), for: .children, on: groupElement)
+        reader.set(.string("AXGroup"), for: .role, on: groupElement)
+        reader.set(.string("AXTextArea"), for: .role, on: textElement)
+        reader.set(.string("Draft reply"), for: .value, on: textElement)
+        reader.set(.textRange(AXTextRange(location: 11, length: 0)), for: .selectedTextRange, on: textElement)
+        reader.set(.bool(true), for: .focused, on: textElement)
+        let client = AXClient(reader: reader)
+
+        let result = try client.focusedElement()
+
+        XCTAssertEqual(result.element, textElement)
+        XCTAssertEqual(result.role, "AXTextArea")
+        XCTAssertEqual(result.value, "Draft reply")
+        XCTAssertEqual(result.selectedRange, AXTextRange(location: 11, length: 0))
+        XCTAssertTrue(
+            reader.requests.contains(
+                FakeAXAttributeReader.Request(element: applicationElement, attribute: .focusedWindow)
+            )
+        )
+    }
+
     func testFocusedElementThrowsWhenFocusedUIElementCannotBeRead() {
         let systemWideElement = AXElement(FakeAXNode())
         let reader = FakeAXAttributeReader(systemWideElement: systemWideElement)
@@ -154,6 +284,7 @@ private final class FakeAXAttributeReader: AXAttributeReading {
     }
 
     private let systemWideElementValue: AXElement
+    var frontmostApplicationElementValue: AXElement?
     private var values: [AttributeKey: Result<AXAttributePayload, AXClientError>] = [:]
     private(set) var requests: [Request] = []
 
@@ -163,6 +294,10 @@ private final class FakeAXAttributeReader: AXAttributeReading {
 
     func systemWideElement() -> AXElement {
         systemWideElementValue
+    }
+
+    func frontmostApplicationElement() -> AXElement? {
+        frontmostApplicationElementValue
     }
 
     func copyAttribute(_ attribute: AXAttribute, from element: AXElement) -> Result<AXAttributePayload, AXClientError> {

@@ -106,7 +106,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             logger.log("Run Active Agents requested for \(names.count) active agent(s).")
         }
 
-        activeAgentRunTaskController.startRun()
+        let runTask = activeAgentRunTaskController.startRun()
+        Task { @MainActor [weak self] in
+            let summary = await runTask.value
+            guard summary.failureStage == .emptyInput else {
+                return
+            }
+
+            self?.statusBarController?.showEmptyInputFeedback()
+        }
     }
 
     private func registerRunActiveAgentsHotkey() {
@@ -146,7 +154,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showDebugOverlayProbe() {
         do {
             let capture = try AccessibilityPreparingInputCapture(
-                preparer: FocusedApplicationAccessibilityPreparer(logger: logger.log),
+                preparer: FocusedApplicationAccessibilityPreparer(
+                    logger: logger.log
+                ),
                 baseCapture: FocusedTextSession()
             ).capture()
             let anchor = OverlayAnchorGeometry(

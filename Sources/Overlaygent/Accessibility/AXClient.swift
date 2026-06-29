@@ -3,18 +3,28 @@ import AppKit
 import Foundation
 
 enum AXAttribute: Equatable {
+    case focusedApplication
+    case focusedWindow
     case focusedUIElement
+    case focused
     case role
     case subrole
     case value
     case selectedTextRange
+    case children
     case position
     case size
 
     var name: String {
         switch self {
+        case .focusedApplication:
+            return kAXFocusedApplicationAttribute as String
+        case .focusedWindow:
+            return kAXFocusedWindowAttribute as String
         case .focusedUIElement:
             return kAXFocusedUIElementAttribute as String
+        case .focused:
+            return kAXFocusedAttribute as String
         case .role:
             return kAXRoleAttribute as String
         case .subrole:
@@ -23,6 +33,8 @@ enum AXAttribute: Equatable {
             return kAXValueAttribute as String
         case .selectedTextRange:
             return kAXSelectedTextRangeAttribute as String
+        case .children:
+            return kAXChildrenAttribute as String
         case .position:
             return kAXPositionAttribute as String
         case .size:
@@ -33,7 +45,9 @@ enum AXAttribute: Equatable {
 
 enum AXAttributePayload: Equatable {
     case element(AXElement)
+    case elements([AXElement])
     case string(String)
+    case bool(Bool)
     case textRange(AXTextRange)
     case point(CGPoint)
     case size(CGSize)
@@ -59,7 +73,14 @@ enum AXClientError: Error, Equatable, CustomStringConvertible {
 
 protocol AXAttributeReading {
     func systemWideElement() -> AXElement
+    func frontmostApplicationElement() -> AXElement?
     func copyAttribute(_ attribute: AXAttribute, from element: AXElement) -> Result<AXAttributePayload, AXClientError>
+}
+
+extension AXAttributeReading {
+    func frontmostApplicationElement() -> AXElement? {
+        nil
+    }
 }
 
 protocol AXCoordinateConverting {
@@ -100,6 +121,14 @@ struct SystemAXCoordinateConverter: AXCoordinateConverting {
 }
 
 final class AXClient {
+    private struct TextElementCandidate {
+        var element: AXElement
+        var selectedRange: AXTextRange?
+        var isFocused: Bool
+    }
+
+    private let textFallbackSearchMaxDepth = 12
+    private let textFallbackSearchMaxNodes = 700
     private let reader: AXAttributeReading
     private let coordinateConverter: any AXCoordinateConverting
 
@@ -113,7 +142,7 @@ final class AXClient {
 
     func focusedElement() throws -> AXFocusedElement {
         let systemWideElement = reader.systemWideElement()
-        let element = try requiredElementAttribute(.focusedUIElement, from: systemWideElement)
+        let element = try focusedElement(from: systemWideElement)
 
         return AXFocusedElement(
             element: element,
@@ -123,6 +152,215 @@ final class AXClient {
             selectedRange: optionalTextRangeAttribute(.selectedTextRange, from: element),
             frame: optionalFrame(from: element)
         )
+    }
+
+    private func focusedElement(from systemWideElement: AXElement) throws -> AXElement {
+        do {
+            return try requiredElementAttribute(.focusedUIElement, from: systemWideElement)
+        } catch {
+            guard shouldTryApplicationFallback(after: error) else {
+                throw error
+            }
+
+            if let element = try focusedElementFromFocusedApplication(systemWideElement) {
+                return element
+            }
+
+            if let applicationElement = reader.frontmostApplicationElement() {
+                return try focusedElement(fromApplicationElement: applicationElement)
+            }
+
+            throw error
+        }
+    }
+
+    private func focusedElementFromFocusedApplication(_ systemWideElement: AXElement) throws -> AXElement? {
+        do {
+            let applicationElement = try requiredElementAttribute(.focusedApplication, from: systemWideElement)
+            return try focusedElement(fromApplicationElement: applicationElement)
+        } catch let error as AXClientError {
+            switch error {
+            case let .attributeUnavailable(attribute, _)
+                where attribute == AXAttribute.focusedApplication.name
+                    || attribute == AXAttribute.focusedUIElement.name:
+                return nil
+            default:
+                throw error
+            }
+        }
+    }
+
+    private func focusedElement(fromApplicationElement applicationElement: AXElement) throws -> AXElement {
+        do {
+            return try requiredElementAttribute(.focusedUIElement, from: applicationElement)
+        } catch {
+            guard shouldTryApplicationFallback(after: error) else {
+                throw error
+            }
+
+            if let fallbackElement = focusedTextElementFromApplicationTree(applicationElement) {
+                return fallbackElement
+            }
+
+            throw error
+        }
+    }
+
+    private func focusedTextElementFromApplicationTree(_ applicationElement: AXElement) -> AXElement? {
+        let roots = searchRoots(for: applicationElement)
+        var focusedCandidates: [TextElementCandidate] = []
+        var rangedCandidates: [TextElementCandidate] = []
+        var textCandidates: [TextElementCandidate] = []
+        var visited = Set<AXElement>()
+        var remainingNodes = textFallbackSearchMaxNodes
+
+        for root in roots {
+            collectTextCandidates(
+                from: root,
+                depth: 0,
+                visited: &visited,
+                remainingNodes: &remainingNodes,
+                focusedCandidates: &focusedCandidates,
+                rangedCandidates: &rangedCandidates,
+                textCandidates: &textCandidates
+            )
+
+            guard remainingNodes > 0 else {
+                break
+            }
+        }
+
+        if let focusedCandidate = focusedCandidates.last {
+            return focusedCandidate.element
+        }
+
+        if let rangedCandidate = rangedCandidates.last {
+            return rangedCandidate.element
+        }
+
+        return textCandidates.count == 1 ? textCandidates[0].element : nil
+    }
+
+    private func searchRoots(for applicationElement: AXElement) -> [AXElement] {
+        var roots: [AXElement] = []
+
+        if let focusedWindow = optionalElementAttribute(.focusedWindow, from: applicationElement) {
+            roots.append(focusedWindow)
+        }
+
+        roots.append(applicationElement)
+        return roots
+    }
+
+    private func collectTextCandidates(
+        from element: AXElement,
+        depth: Int,
+        visited: inout Set<AXElement>,
+        remainingNodes: inout Int,
+        focusedCandidates: inout [TextElementCandidate],
+        rangedCandidates: inout [TextElementCandidate],
+        textCandidates: inout [TextElementCandidate]
+    ) {
+        guard depth <= textFallbackSearchMaxDepth,
+              remainingNodes > 0,
+              visited.insert(element).inserted else {
+            return
+        }
+
+        remainingNodes -= 1
+
+        if let candidate = textElementCandidate(from: element) {
+            textCandidates.append(candidate)
+
+            if candidate.isFocused {
+                focusedCandidates.append(candidate)
+            }
+
+            if candidate.selectedRange != nil {
+                rangedCandidates.append(candidate)
+            }
+        }
+
+        for child in optionalElementsAttribute(.children, from: element) {
+            collectTextCandidates(
+                from: child,
+                depth: depth + 1,
+                visited: &visited,
+                remainingNodes: &remainingNodes,
+                focusedCandidates: &focusedCandidates,
+                rangedCandidates: &rangedCandidates,
+                textCandidates: &textCandidates
+            )
+
+            guard remainingNodes > 0 else {
+                return
+            }
+        }
+    }
+
+    private func textElementCandidate(from element: AXElement) -> TextElementCandidate? {
+        let role = optionalStringAttribute(.role, from: element)
+        guard isTextInputRole(role) else {
+            return nil
+        }
+
+        let value = optionalStringAttribute(.value, from: element)
+        guard value != nil else {
+            return nil
+        }
+
+        return TextElementCandidate(
+            element: element,
+            selectedRange: optionalTextRangeAttribute(.selectedTextRange, from: element),
+            isFocused: optionalBoolAttribute(.focused, from: element) ?? false
+        )
+    }
+
+    private func isTextInputRole(_ role: String?) -> Bool {
+        guard let role else {
+            return false
+        }
+
+        let supportedRoles = [
+            NSAccessibility.Role.textArea.rawValue,
+            NSAccessibility.Role.textField.rawValue,
+            "AXSecureTextField"
+        ]
+
+        return supportedRoles.contains { supportedRole in
+            supportedRole.caseInsensitiveCompare(role) == .orderedSame
+        }
+    }
+
+    private func shouldTryApplicationFallback(after error: Error) -> Bool {
+        guard let axError = error as? AXClientError else {
+            return false
+        }
+
+        switch axError {
+        case let .attributeUnavailable(attribute, _):
+            return attribute == AXAttribute.focusedUIElement.name
+        default:
+            return false
+        }
+    }
+
+    private func optionalElementAttribute(_ attribute: AXAttribute, from element: AXElement) -> AXElement? {
+        switch reader.copyAttribute(attribute, from: element) {
+        case let .success(.element(value)):
+            return value
+        default:
+            return nil
+        }
+    }
+
+    private func optionalElementsAttribute(_ attribute: AXAttribute, from element: AXElement) -> [AXElement] {
+        switch reader.copyAttribute(attribute, from: element) {
+        case let .success(.elements(value)):
+            return value
+        default:
+            return []
+        }
     }
 
     private func requiredElementAttribute(_ attribute: AXAttribute, from element: AXElement) throws -> AXElement {
@@ -139,6 +377,15 @@ final class AXClient {
     private func optionalStringAttribute(_ attribute: AXAttribute, from element: AXElement) -> String? {
         switch reader.copyAttribute(attribute, from: element) {
         case let .success(.string(value)):
+            return value
+        default:
+            return nil
+        }
+    }
+
+    private func optionalBoolAttribute(_ attribute: AXAttribute, from element: AXElement) -> Bool? {
+        switch reader.copyAttribute(attribute, from: element) {
+        case let .success(.bool(value)):
             return value
         default:
             return nil
@@ -191,8 +438,23 @@ final class AXClient {
 }
 
 final class SystemAXAttributeReader: AXAttributeReading {
+    private let applicationProvider: any FocusedApplicationProviding
+
+    init(applicationProvider: any FocusedApplicationProviding = SystemFocusedApplicationProvider()) {
+        self.applicationProvider = applicationProvider
+    }
+
     func systemWideElement() -> AXElement {
         AXElement(AXUIElementCreateSystemWide())
+    }
+
+    func frontmostApplicationElement() -> AXElement? {
+        guard let application = applicationProvider.focusedApplication(),
+              NSRunningApplication(processIdentifier: application.processIdentifier) != nil else {
+            return nil
+        }
+
+        return AXElement(AXUIElementCreateApplication(application.processIdentifier))
     }
 
     func copyAttribute(_ attribute: AXAttribute, from element: AXElement) -> Result<AXAttributePayload, AXClientError> {
@@ -216,6 +478,11 @@ final class SystemAXAttributeReader: AXAttributeReading {
 
         if typeID == AXUIElementGetTypeID() {
             return .element(AXElement(rawValue))
+        }
+
+        if typeID == CFBooleanGetTypeID() {
+            let boolValue = unsafeBitCast(rawValue, to: CFBoolean.self)
+            return .bool(CFBooleanGetValue(boolValue))
         }
 
         if typeID == AXValueGetTypeID() {
@@ -247,6 +514,20 @@ final class SystemAXAttributeReader: AXAttributeReading {
 
         if let attributedString = rawValue as? NSAttributedString {
             return .string(attributedString.string)
+        }
+
+        if let rawChildren = rawValue as? [AnyObject] {
+            let elements = rawChildren.compactMap { rawChild -> AXElement? in
+                guard CFGetTypeID(rawChild) == AXUIElementGetTypeID() else {
+                    return nil
+                }
+
+                return AXElement(rawChild)
+            }
+
+            if elements.count == rawChildren.count {
+                return .elements(elements)
+            }
         }
 
         return .unsupported(typeDescription: String(describing: type(of: rawValue)))

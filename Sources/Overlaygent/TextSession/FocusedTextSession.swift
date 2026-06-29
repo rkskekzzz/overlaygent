@@ -28,12 +28,15 @@ struct FocusedTextCapture: Equatable {
 
 enum FocusedTextSessionError: Error, Equatable, CustomStringConvertible {
     case rejected(reason: AXTextInputRejectionReason)
+    case missingFocusedElement
     case missingSourceBundleID
 
     var description: String {
         switch self {
         case let .rejected(reason):
             return "Focused text session rejected: \(reason.description)"
+        case .missingFocusedElement:
+            return "Focused text session rejected: no focused UI element"
         case .missingSourceBundleID:
             return "Focused text session rejected: missing source bundle identifier"
         }
@@ -66,24 +69,35 @@ struct TextSnapshotHasher {
 }
 
 final class FocusedTextSession {
+    typealias Sleeper = (TimeInterval) -> Void
+
     private let focusedElementProvider: AXFocusedElementProviding
     private let secureFieldDetector: AXSecureFieldDetector
     private let sourceBundleResolver: AXSourceBundleResolving
     private let geometryResolver: AXGeometryResolver
     private let hasher: TextSnapshotHasher
+    private let focusedElementRetryCount: Int
+    private let focusedElementRetryDelay: TimeInterval
+    private let sleeper: Sleeper
 
     init(
         focusedElementProvider: AXFocusedElementProviding = AXClient(),
         secureFieldDetector: AXSecureFieldDetector = AXSecureFieldDetector(),
         sourceBundleResolver: AXSourceBundleResolving = SystemAXSourceBundleResolver(),
         geometryResolver: AXGeometryResolver = AXGeometryResolver(),
-        hasher: TextSnapshotHasher = TextSnapshotHasher()
+        hasher: TextSnapshotHasher = TextSnapshotHasher(),
+        focusedElementRetryCount: Int = 8,
+        focusedElementRetryDelay: TimeInterval = 0.075,
+        sleeper: @escaping Sleeper = { Thread.sleep(forTimeInterval: $0) }
     ) {
         self.focusedElementProvider = focusedElementProvider
         self.secureFieldDetector = secureFieldDetector
         self.sourceBundleResolver = sourceBundleResolver
         self.geometryResolver = geometryResolver
         self.hasher = hasher
+        self.focusedElementRetryCount = max(0, focusedElementRetryCount)
+        self.focusedElementRetryDelay = max(0, focusedElementRetryDelay)
+        self.sleeper = sleeper
     }
 
     func snapshot() throws -> TextSnapshot {
@@ -91,7 +105,7 @@ final class FocusedTextSession {
     }
 
     func capture() throws -> FocusedTextCapture {
-        let focusedElement = try focusedElementProvider.focusedElement()
+        let focusedElement = try readFocusedElement()
 
         switch secureFieldDetector.guardTextInput(focusedElement) {
         case .allowed:
@@ -121,6 +135,40 @@ final class FocusedTextSession {
             snapshot: snapshot,
             geometry: geometryResolver.resolveGeometry(for: focusedElement)
         )
+    }
+
+    private func readFocusedElement() throws -> AXFocusedElement {
+        var remainingRetries = focusedElementRetryCount
+
+        while true {
+            do {
+                return try focusedElementProvider.focusedElement()
+            } catch {
+                guard Self.isFocusedElementUnavailable(error) else {
+                    throw error
+                }
+
+                guard remainingRetries > 0 else {
+                    throw FocusedTextSessionError.missingFocusedElement
+                }
+
+                remainingRetries -= 1
+                sleeper(focusedElementRetryDelay)
+            }
+        }
+    }
+
+    private static func isFocusedElementUnavailable(_ error: Error) -> Bool {
+        guard let axError = error as? AXClientError else {
+            return false
+        }
+
+        switch axError {
+        case let .attributeUnavailable(attribute, _):
+            return attribute == AXAttribute.focusedUIElement.name
+        default:
+            return false
+        }
     }
 
     private func selectedRange(from axRange: AXTextRange?, text: String) -> Range<Int>? {

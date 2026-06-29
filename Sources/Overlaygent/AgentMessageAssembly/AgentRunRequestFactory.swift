@@ -67,6 +67,7 @@ struct AgentRunPreparedRequest: Equatable {
 enum AgentRunRequestFactoryError: Error, Equatable {
     case noActiveEnabledAgents
     case noSelectedAgents
+    case emptyInput
 }
 
 struct AgentRunRequestFactory {
@@ -144,6 +145,10 @@ struct AgentRunRequestFactory {
         privacyOptions: AgentRunPrivacyOptions
     ) throws -> AgentRunRequest {
         let snapshot = capture.snapshot
+        guard snapshot.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            throw AgentRunRequestFactoryError.emptyInput
+        }
+
         let memory = try memoryStore.loadMemory()
         let privacyPolicy = privacyOptions.privacyPolicy
         let appContext = resolveContext(

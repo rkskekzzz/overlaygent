@@ -39,6 +39,7 @@ enum ActiveAgentRunFailureStage: Equatable {
     case request
     case engine
     case cancelled
+    case emptyInput
 }
 
 struct ActiveAgentRunSummary: Equatable {
@@ -87,6 +88,19 @@ final class RunActiveAgentsCoordinator: RunActiveAgentsCoordinating {
                 privacyOptions: privacyOptions
             )
         } catch {
+            if let factoryError = error as? AgentRunRequestFactoryError,
+               factoryError == .emptyInput {
+                logger("Agent run skipped because focused input is empty.")
+                return ActiveAgentRunSummary(
+                    requestedAgentCount: 0,
+                    totalResults: 0,
+                    successfulResults: 0,
+                    failedResults: 0,
+                    didShowOverlay: false,
+                    failureStage: .emptyInput
+                )
+            }
+
             let detail = Self.describe(error)
             logger("Agent run request failed: \(detail)")
             await presentStatus(

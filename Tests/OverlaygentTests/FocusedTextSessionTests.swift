@@ -133,6 +133,76 @@ final class FocusedTextSessionTests: XCTestCase {
         XCTAssertEqual(snapshot.text, "Draft")
     }
 
+    func testFocusedElementUnavailableIsRetriedBeforeCapture() throws {
+        let element = AXElement(FakeAXNode())
+        let provider = SequenceFocusedElementProvider(
+            results: [
+                .failure(
+                    AXClientError.attributeUnavailable(
+                        attribute: AXAttribute.focusedUIElement.name,
+                        code: -25211
+                    )
+                ),
+                .success(
+                    focusedElement(
+                        element: element,
+                        role: "AXTextField",
+                        subrole: nil,
+                        value: "Draft",
+                        selectedRange: AXTextRange(location: 5, length: 0)
+                    )
+                )
+            ]
+        )
+        var sleepDurations: [TimeInterval] = []
+        let session = FocusedTextSession(
+            focusedElementProvider: provider,
+            sourceBundleResolver: FakeSourceBundleResolver(bundleIDs: [element: "com.example.App"]),
+            geometryResolver: AXGeometryResolver(boundsReader: FakeRangeBoundsReader()),
+            focusedElementRetryCount: 2,
+            focusedElementRetryDelay: 0.01,
+            sleeper: { sleepDurations.append($0) }
+        )
+
+        let snapshot = try session.snapshot()
+
+        XCTAssertEqual(snapshot.text, "Draft")
+        XCTAssertEqual(provider.callCount, 2)
+        XCTAssertEqual(sleepDurations, [0.01])
+    }
+
+    func testPersistentFocusedElementUnavailableBecomesMissingFocusedElement() {
+        let provider = SequenceFocusedElementProvider(
+            results: [
+                .failure(
+                    AXClientError.attributeUnavailable(
+                        attribute: AXAttribute.focusedUIElement.name,
+                        code: -25211
+                    )
+                ),
+                .failure(
+                    AXClientError.attributeUnavailable(
+                        attribute: AXAttribute.focusedUIElement.name,
+                        code: -25211
+                    )
+                )
+            ]
+        )
+        let session = FocusedTextSession(
+            focusedElementProvider: provider,
+            sourceBundleResolver: FakeSourceBundleResolver(bundleIDs: [:]),
+            geometryResolver: AXGeometryResolver(boundsReader: FakeRangeBoundsReader()),
+            focusedElementRetryCount: 1,
+            focusedElementRetryDelay: 0,
+            sleeper: { _ in }
+        )
+
+        XCTAssertThrowsError(try session.snapshot()) { error in
+            XCTAssertEqual(error as? FocusedTextSessionError, .missingFocusedElement)
+        }
+        XCTAssertEqual(provider.callCount, 2)
+    }
+
     func testMissingSourceBundleIDRejectsSnapshot() {
         let element = AXElement(FakeAXNode())
         let provider = FakeFocusedElementProvider(
@@ -186,6 +256,27 @@ private struct FakeFocusedElementProvider: AXFocusedElementProviding {
 
     func focusedElement() throws -> AXFocusedElement {
         element
+    }
+}
+
+private final class SequenceFocusedElementProvider: AXFocusedElementProviding {
+    private var results: [Result<AXFocusedElement, Error>]
+    private(set) var callCount = 0
+
+    init(results: [Result<AXFocusedElement, Error>]) {
+        self.results = results
+    }
+
+    func focusedElement() throws -> AXFocusedElement {
+        callCount += 1
+        guard results.isEmpty == false else {
+            throw AXClientError.attributeUnavailable(
+                attribute: AXAttribute.focusedUIElement.name,
+                code: -25211
+            )
+        }
+
+        return try results.removeFirst().get()
     }
 }
 

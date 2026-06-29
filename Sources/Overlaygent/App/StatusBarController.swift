@@ -1,13 +1,34 @@
 import AppKit
 
+protocol StatusBarButtonProviding: AnyObject {
+    var toolTip: String? { get set }
+    var image: NSImage? { get set }
+    var imagePosition: NSControl.ImagePosition { get set }
+    var imageScaling: NSImageScaling { get set }
+    var title: String { get set }
+}
+
+extension NSStatusBarButton: StatusBarButtonProviding {}
+
 protocol StatusItemProviding: AnyObject {
-    var button: NSStatusBarButton? { get }
+    var statusButton: (any StatusBarButtonProviding)? { get }
     var menu: NSMenu? { get set }
 }
 
-extension NSStatusItem: StatusItemProviding {}
+extension NSStatusItem: StatusItemProviding {
+    var statusButton: (any StatusBarButtonProviding)? {
+        button
+    }
+}
 
 final class StatusBarController: NSObject {
+    typealias SystemImageFactory = (_ systemSymbolName: String, _ accessibilityDescription: String) -> NSImage?
+    typealias StatusIconRestoreCancellation = () -> Void
+    typealias StatusIconRestoreScheduler = (
+        _ duration: TimeInterval,
+        _ restore: @escaping () -> Void
+    ) -> StatusIconRestoreCancellation
+
     struct Actions {
         var runActiveAgents: ([String]) -> Void
         var setAgentActive: (AgentProfile.ID, Bool) -> Void
@@ -61,10 +82,54 @@ final class StatusBarController: NSObject {
         static let quit = "Quit"
     }
 
+    private enum StatusIconState {
+        case normal
+        case emptyInput
+
+        var systemSymbolName: String {
+            switch self {
+            case .normal:
+                return "text.badge.checkmark"
+            case .emptyInput:
+                return "text.badge.xmark"
+            }
+        }
+
+        var accessibilityDescription: String {
+            switch self {
+            case .normal:
+                return "Overlaygent"
+            case .emptyInput:
+                return "No input to review"
+            }
+        }
+
+        var fallbackTitle: String {
+            switch self {
+            case .normal:
+                return "OVG"
+            case .emptyInput:
+                return "0"
+            }
+        }
+
+        var toolTip: String {
+            switch self {
+            case .normal:
+                return "Overlaygent"
+            case .emptyInput:
+                return "No input to review"
+            }
+        }
+    }
+
     private let statusItem: StatusItemProviding
     private let removeStatusItem: () -> Void
     private let actions: Actions
+    private let makeSystemImage: SystemImageFactory
+    private let scheduleStatusIconRestore: StatusIconRestoreScheduler
     private var activeAgentEntries: [ActiveAgentEntry]
+    private var cancelStatusIconRestore: StatusIconRestoreCancellation?
 
     private(set) var menu: NSMenu
 
@@ -87,11 +152,23 @@ final class StatusBarController: NSObject {
         statusItem: StatusItemProviding,
         removeStatusItem: @escaping () -> Void = {},
         actions: Actions = .placeholder,
-        activeAgentEntries: [ActiveAgentEntry] = []
+        activeAgentEntries: [ActiveAgentEntry] = [],
+        makeSystemImage: @escaping SystemImageFactory = {
+            NSImage(systemSymbolName: $0, accessibilityDescription: $1)
+        },
+        scheduleStatusIconRestore: @escaping StatusIconRestoreScheduler = { duration, restore in
+            let workItem = DispatchWorkItem(block: restore)
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: workItem)
+            return {
+                workItem.cancel()
+            }
+        }
     ) {
         self.statusItem = statusItem
         self.removeStatusItem = removeStatusItem
         self.actions = actions
+        self.makeSystemImage = makeSystemImage
+        self.scheduleStatusIconRestore = scheduleStatusIconRestore
         self.activeAgentEntries = activeAgentEntries
         self.menu = NSMenu()
 
@@ -102,6 +179,7 @@ final class StatusBarController: NSObject {
     }
 
     deinit {
+        cancelStatusIconRestore?()
         removeStatusItem()
     }
 
@@ -110,21 +188,36 @@ final class StatusBarController: NSObject {
         rebuildMenu()
     }
 
-    private func configureStatusItem() {
-        if let button = statusItem.button {
-            button.toolTip = "Overlaygent"
+    func showEmptyInputFeedback(duration: TimeInterval = 1.0) {
+        cancelStatusIconRestore?()
+        applyStatusIcon(.emptyInput)
 
-            if let image = NSImage(
-                systemSymbolName: "text.badge.checkmark",
-                accessibilityDescription: "Overlaygent"
-            ) {
-                image.isTemplate = true
-                button.image = image
-                button.imagePosition = .imageOnly
-                button.imageScaling = .scaleProportionallyDown
-            } else {
-                button.title = "OVG"
-            }
+        cancelStatusIconRestore = scheduleStatusIconRestore(duration) { [weak self] in
+            self?.applyStatusIcon(.normal)
+            self?.cancelStatusIconRestore = nil
+        }
+    }
+
+    private func configureStatusItem() {
+        applyStatusIcon(.normal)
+    }
+
+    private func applyStatusIcon(_ state: StatusIconState) {
+        guard let button = statusItem.statusButton else {
+            return
+        }
+
+        button.toolTip = state.toolTip
+
+        if let image = makeSystemImage(state.systemSymbolName, state.accessibilityDescription) {
+            image.isTemplate = true
+            button.image = image
+            button.title = ""
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+        } else {
+            button.image = nil
+            button.title = state.fallbackTitle
         }
     }
 

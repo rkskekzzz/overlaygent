@@ -15,10 +15,13 @@ final class FocusedApplicationAccessibilityPreparerTests: XCTestCase {
             )
         )
         var logs: [String] = []
+        var sleepDurations: [TimeInterval] = []
         let preparer = FocusedApplicationAccessibilityPreparer(
             applicationProvider: applicationProvider,
             electronEnabler: electronEnabler,
-            logger: { logs.append($0) }
+            logger: { logs.append($0) },
+            postEnableDelay: 0.15,
+            sleeper: { sleepDurations.append($0) }
         )
 
         preparer.prepareFocusedApplication()
@@ -33,6 +36,7 @@ final class FocusedApplicationAccessibilityPreparerTests: XCTestCase {
             ]
         )
         XCTAssertEqual(logs, [])
+        XCTAssertEqual(sleepDurations, [0.15])
     }
 
     func testPreparerDoesNothingWhenNoFocusedApplicationIsAvailable() {
@@ -44,7 +48,8 @@ final class FocusedApplicationAccessibilityPreparerTests: XCTestCase {
         let preparer = FocusedApplicationAccessibilityPreparer(
             applicationProvider: applicationProvider,
             electronEnabler: electronEnabler,
-            logger: { logs.append($0) }
+            logger: { logs.append($0) },
+            sleeper: { _ in XCTFail("Unknown apps should not sleep after preparation.") }
         )
 
         preparer.prepareFocusedApplication()
@@ -72,7 +77,8 @@ final class FocusedApplicationAccessibilityPreparerTests: XCTestCase {
         let preparer = FocusedApplicationAccessibilityPreparer(
             applicationProvider: applicationProvider,
             electronEnabler: electronEnabler,
-            logger: { logs.append($0) }
+            logger: { logs.append($0) },
+            sleeper: { _ in XCTFail("Failed preparation should not sleep.") }
         )
 
         preparer.prepareFocusedApplication()
@@ -97,7 +103,8 @@ final class FocusedApplicationAccessibilityPreparerTests: XCTestCase {
         let preparer = FocusedApplicationAccessibilityPreparer(
             applicationProvider: applicationProvider,
             electronEnabler: electronEnabler,
-            logger: { logs.append($0) }
+            logger: { logs.append($0) },
+            sleeper: { _ in XCTFail("Unknown apps should not sleep after preparation.") }
         )
 
         preparer.prepareFocusedApplication()

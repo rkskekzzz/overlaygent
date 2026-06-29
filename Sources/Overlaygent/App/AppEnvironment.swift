@@ -36,7 +36,9 @@ struct AppEnvironment {
         )
         let logger = SafeLogger.default
         let textSession = AccessibilityPreparingInputCapture(
-            preparer: FocusedApplicationAccessibilityPreparer(logger: logger.log),
+            preparer: FocusedApplicationAccessibilityPreparer(
+                logger: logger.log
+            ),
             baseCapture: FocusedTextSession()
         )
         let requestFactory = AgentRunRequestFactory(

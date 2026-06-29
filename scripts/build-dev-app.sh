@@ -52,6 +52,10 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 
 IDENTITY="${OVERLAYGENT_CODESIGN_IDENTITY:-}"
+if [[ -z "$IDENTITY" ]] && security find-identity -v -p codesigning | grep -q '"Persona Writing Agent Local Dev"'; then
+  IDENTITY="Persona Writing Agent Local Dev"
+fi
+
 if [[ -n "$IDENTITY" ]]; then
   codesign --force --deep --options runtime --sign "$IDENTITY" "$APP_DIR"
   codesign --verify --deep --strict "$APP_DIR"
@@ -59,7 +63,11 @@ else
   if [[ -d "$APP_DIR/Contents/_CodeSignature" ]]; then
     rm -rf "$APP_DIR/Contents/_CodeSignature"
   fi
-  echo "warning: skipping codesign for local dev app; set OVERLAYGENT_CODESIGN_IDENTITY to sign explicitly." >&2
+  codesign --force --deep --sign - "$APP_DIR"
+  codesign --verify --deep --strict "$APP_DIR"
+  echo "warning: ad-hoc signed local dev app; set OVERLAYGENT_CODESIGN_IDENTITY to sign explicitly." >&2
 fi
+
+xattr -cr "$APP_DIR" 2>/dev/null || true
 
 echo "$APP_DIR"

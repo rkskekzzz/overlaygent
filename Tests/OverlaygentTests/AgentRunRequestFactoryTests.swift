@@ -252,6 +252,34 @@ final class AgentRunRequestFactoryTests: XCTestCase {
         XCTAssertEqual(contextResolver.requests, [])
     }
 
+    func testMakePreparedRequestThrowsWhenFocusedInputIsEmpty() {
+        let inputCapturer = FakeInputCapturer(
+            snapshot: textSnapshot(sourceBundleID: "com.example.App", text: " \n\t ")
+        )
+        let memoryLoader = FakeAgentMemoryLoader(memory: AgentMemoryStore.defaultMemory())
+        let contextResolver = RecordingContextResolver(result: conversationContext(messageCount: 1))
+        let orchestrator = RecordingAgentOrchestrator(selectedAgentIDs: [
+            UUID(uuidString: "00000000-0000-0000-0000-000000000700")!
+        ])
+        let factory = AgentRunRequestFactory(
+            textSession: inputCapturer,
+            agentProfileStore: FakeAgentProfileLoader(
+                profiles: [agent(isEnabled: true, isActive: true)]
+            ),
+            memoryStore: memoryLoader,
+            contextResolver: contextResolver,
+            orchestrator: orchestrator
+        )
+
+        XCTAssertThrowsError(try factory.makePreparedRequest()) { error in
+            XCTAssertEqual(error as? AgentRunRequestFactoryError, .emptyInput)
+        }
+        XCTAssertEqual(inputCapturer.callCount, 1)
+        XCTAssertEqual(memoryLoader.callCount, 0)
+        XCTAssertEqual(contextResolver.requests, [])
+        XCTAssertEqual(orchestrator.candidateNames, [])
+    }
+
     func testPrivacyOptionsClampNegativeVisibleMessageLimit() {
         let options = AgentRunPrivacyOptions(
             includeConversationContext: true,
@@ -272,10 +300,13 @@ final class AgentRunRequestFactoryTests: XCTestCase {
         )
     }
 
-    private func textSnapshot(sourceBundleID: String) -> TextSnapshot {
+    private func textSnapshot(
+        sourceBundleID: String,
+        text: String = "Can we make deploy after review?"
+    ) -> TextSnapshot {
         TextSnapshot(
-            text: "Can we make deploy after review?",
-            selectedRange: 0..<6,
+            text: text,
+            selectedRange: text.isEmpty ? nil : 0..<min(6, text.count),
             sourceBundleID: sourceBundleID,
             sourceElementRole: "AXTextArea",
             contentHash: "sha256:test"

@@ -11,6 +11,7 @@ final class ElectronAccessibilityEnablerTests: XCTestCase {
         XCTAssertEqual(enabler.knownElectronApp(bundleID: "com.hnc.Discord")?.displayName, "Discord")
         XCTAssertEqual(enabler.knownElectronApp(bundleID: "notion.id")?.displayName, "Notion Desktop")
         XCTAssertEqual(enabler.knownElectronApp(bundleID: " COM.MICROSOFT.VSCODE ")?.displayName, "VS Code")
+        XCTAssertEqual(enabler.knownElectronApp(bundleID: "com.openai.codex")?.displayName, "Codex")
     }
 
     func testEnableSetsManualAccessibilityOnProvidedApplicationElementForKnownBundle() {

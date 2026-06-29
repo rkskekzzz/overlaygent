@@ -10,13 +10,15 @@ final class KnownAppCatalogTests: XCTestCase {
             .channelTalk,
             .discord,
             .notion,
-            .vsCode
+            .vsCode,
+            .codex
         ])
         XCTAssertEqual(catalog.primaryBundleID(for: .slack), "com.tinyspeck.slackmacgap")
         XCTAssertEqual(catalog.primaryBundleID(for: .channelTalk), "com.zoyi.channel.desk.osx")
         XCTAssertEqual(catalog.primaryBundleID(for: .discord), "com.hnc.Discord")
         XCTAssertEqual(catalog.primaryBundleID(for: .notion), "notion.id")
         XCTAssertEqual(catalog.primaryBundleID(for: .vsCode), "com.microsoft.VSCode")
+        XCTAssertEqual(catalog.primaryBundleID(for: .codex), "com.openai.codex")
     }
 
     func testDefaultCatalogHasUniqueNormalizedBundleIDs() {

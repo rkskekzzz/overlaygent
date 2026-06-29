@@ -154,6 +154,43 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertEqual(dispatchedNames, ["Grammar Fixer"])
     }
 
+    func testEmptyInputFeedbackTemporarilyReplacesStatusIcon() {
+        let button = FakeStatusBarButton()
+        let statusItem = FakeStatusItem(statusButton: button)
+        var scheduledDuration: TimeInterval?
+        var restoreStatusIcon: (() -> Void)?
+        var requestedSymbols: [String] = []
+        let controller = StatusBarController(
+            statusItem: statusItem,
+            makeSystemImage: { systemSymbolName, _ in
+                requestedSymbols.append(systemSymbolName)
+                return NSImage(size: NSSize(width: 18, height: 18))
+            },
+            scheduleStatusIconRestore: { duration, restore in
+                scheduledDuration = duration
+                restoreStatusIcon = restore
+                return {}
+            }
+        )
+
+        XCTAssertEqual(requestedSymbols, ["text.badge.checkmark"])
+        XCTAssertNotNil(button.image)
+        XCTAssertEqual(button.toolTip, "Overlaygent")
+
+        controller.showEmptyInputFeedback()
+
+        XCTAssertEqual(requestedSymbols, ["text.badge.checkmark", "text.badge.xmark"])
+        XCTAssertNotNil(button.image)
+        XCTAssertEqual(button.toolTip, "No input to review")
+        XCTAssertEqual(scheduledDuration, 1.0)
+
+        restoreStatusIcon?()
+
+        XCTAssertEqual(requestedSymbols, ["text.badge.checkmark", "text.badge.xmark", "text.badge.checkmark"])
+        XCTAssertNotNil(button.image)
+        XCTAssertEqual(button.toolTip, "Overlaygent")
+    }
+
     private func menuItemTitle(_ item: NSMenuItem) -> String {
         item.isSeparatorItem ? "-" : item.title
     }
@@ -184,6 +221,18 @@ final class StatusBarControllerTests: XCTestCase {
 }
 
 private final class FakeStatusItem: StatusItemProviding {
-    var button: NSStatusBarButton?
+    var statusButton: (any StatusBarButtonProviding)?
     var menu: NSMenu?
+
+    init(statusButton: (any StatusBarButtonProviding)? = nil) {
+        self.statusButton = statusButton
+    }
+}
+
+private final class FakeStatusBarButton: StatusBarButtonProviding {
+    var toolTip: String?
+    var image: NSImage?
+    var imagePosition: NSControl.ImagePosition = .noImage
+    var imageScaling: NSImageScaling = .scaleNone
+    var title: String = ""
 }

@@ -236,6 +236,59 @@ final class RunActiveAgentsCoordinatorTests: XCTestCase {
         XCTAssertTrue(logs.contains { $0.contains("request failed") })
     }
 
+    func testEmptyInputRequestSkipsOverlayAndEngineRun() async {
+        let factory = RecordingRunRequestFactory(result: .failure(AgentRunRequestFactoryError.emptyInput))
+        let engine = RecordingCorrectionEngine(result: .success([]))
+        let overlay = RecordingSuggestionPresenter()
+        var logs: [String] = []
+        let coordinator = RunActiveAgentsCoordinator(
+            requestFactory: factory,
+            correctionEngine: engine,
+            overlayPresenter: overlay,
+            suggestionApplyCoordinator: RecordingSuggestionApplyCoordinator(),
+            logger: { logs.append($0) }
+        )
+
+        let summary = await coordinator.runActiveAgents()
+
+        XCTAssertEqual(factory.callCount, 1)
+        XCTAssertEqual(engine.requests, [])
+        XCTAssertEqual(overlay.showCallCount, 0)
+        XCTAssertEqual(
+            summary,
+            ActiveAgentRunSummary(
+                requestedAgentCount: 0,
+                totalResults: 0,
+                successfulResults: 0,
+                failedResults: 0,
+                didShowOverlay: false,
+                failureStage: .emptyInput
+            )
+        )
+        XCTAssertTrue(logs.contains { $0.contains("focused input is empty") })
+    }
+
+    func testMissingFocusedElementShowsReadFailureOverlay() async {
+        let factory = RecordingRunRequestFactory(result: .failure(FocusedTextSessionError.missingFocusedElement))
+        let engine = RecordingCorrectionEngine(result: .success([]))
+        let overlay = RecordingSuggestionPresenter()
+        let coordinator = RunActiveAgentsCoordinator(
+            requestFactory: factory,
+            correctionEngine: engine,
+            overlayPresenter: overlay,
+            suggestionApplyCoordinator: RecordingSuggestionApplyCoordinator()
+        )
+
+        let summary = await coordinator.runActiveAgents()
+
+        XCTAssertEqual(factory.callCount, 1)
+        XCTAssertEqual(engine.requests, [])
+        XCTAssertEqual(overlay.showCallCount, 1)
+        XCTAssertEqual(overlay.presentedStatusTitle, "Could not read the current input")
+        XCTAssertEqual(summary.failureStage, .request)
+        XCTAssertTrue(summary.didShowOverlay)
+    }
+
     func testRequestFailureDoesNotLogRawPrivacyGuardValues() async {
         let factory = RecordingRunRequestFactory(
             result: .failure(

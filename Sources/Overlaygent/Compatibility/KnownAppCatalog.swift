@@ -6,6 +6,7 @@ enum KnownAppID: String, CaseIterable, Equatable {
     case discord
     case notion
     case vsCode = "vscode"
+    case codex
 }
 
 struct KnownAppDefinition: Identifiable, Equatable {
@@ -35,7 +36,8 @@ struct KnownAppCatalog: Equatable {
             .channelTalk,
             .discord,
             .notion,
-            .vsCode
+            .vsCode,
+            .codex
         ]
     )
 
@@ -130,6 +132,13 @@ extension KnownAppDefinition {
             visibleContextAdapterSupport: .unsupported,
             electronAXEnableRequired: true
         )
+    )
+
+    static let codex = KnownAppDefinition(
+        appID: .codex,
+        displayName: "Codex",
+        bundleIDs: ["com.openai.codex"],
+        capabilities: electronDocumentCapabilities(visibleContextAdapterSupport: .unsupported)
     )
 
     private static func electronMessagingCapabilities(
