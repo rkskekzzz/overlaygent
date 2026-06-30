@@ -2,11 +2,47 @@
 
 Minimal Swift/AppKit scaffold for the Overlaygent macOS menu bar app.
 
+## Public Documentation
+
+- [Privacy Policy](docs/PRIVACY.md)
+- [Support](docs/SUPPORT.md)
+- [Public release checklist](PUBLIC_RELEASE_CHECKLIST.md)
+
 ## Build
 
 ```sh
 swift build
 ```
+
+## Direct Release Build
+
+Release artifacts are built separately from local dev artifacts so the
+production bundle id does not inherit dev defaults.
+
+```sh
+scripts/build-release-app.sh
+scripts/package-release-dmg.sh
+```
+
+Defaults:
+
+- bundle id: `com.suhshin.overlaygent`
+- app name: `Overlaygent`
+- version/build: `0.1.0` / `1`
+
+To notarize the generated DMG, first create a local notarytool keychain profile,
+then run:
+
+```sh
+OVERLAYGENT_NOTARY_PROFILE=my-notary scripts/notarize-release-dmg.sh
+scripts/verify-release-artifacts.sh
+```
+
+Without notarization, Gatekeeper assessment is expected to reject the Developer
+ID-signed app as `Unnotarized Developer ID`.
+
+The notarization script staples the ticket and rewrites the `.sha256` file after
+stapling, because stapling changes the DMG bytes.
 
 ## Run
 

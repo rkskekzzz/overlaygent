@@ -1,6 +1,6 @@
 # Overlaygent Public Release Checklist
 
-Last updated: 2026-06-29 KST
+Last updated: 2026-06-30 KST
 
 Current release judgment: not ready for public web distribution yet.
 
@@ -65,55 +65,65 @@ flowchart TD
 These are things the agent cannot complete without the user's account, legal, or
 business decisions.
 
-- [ ] Enroll in the Apple Developer Program.
+- [x] Enroll in the Apple Developer Program.
   - Needed for: Developer ID certificate, App Store Connect, notarization.
   - Do not paste Apple credentials into this repo or checklist.
-- [ ] Choose seller identity.
+- [x] Choose seller identity.
+  - Decision: individual account.
   - Options: individual account or organization account.
   - Organization release may require D-U-N-S and legal authority checks.
-- [ ] Choose final production bundle id.
-  - Suggested candidate: `com.rkskekzzz.overlaygent`.
+- [x] Choose final production bundle id.
+  - Decision: `com.suhshin.overlaygent`.
   - Current dev bundle id is `com.polar.OverlaygentDev`.
-- [ ] Confirm final public app name.
-  - Current product name: `Overlaygent`.
-- [ ] Prepare Privacy Policy URL.
+- [x] Confirm final public app name.
+  - Decision: `Overlaygent`.
+- [x] Prepare Privacy Policy URL.
   - Must cover: current input text, optional visible conversation context, LLM
     provider sharing, local API key storage, local cache/retention/deletion,
     clipboard fallback, support contact.
-- [ ] Prepare Support URL.
+- [x] Prepare Support URL.
   - Can be a simple public page, GitHub page, or documentation page.
+  - Privacy Policy URL:
+    `https://github.com/rkskekzzz/overlaygent/blob/main/docs/PRIVACY.md`.
+  - Support URL:
+    `https://github.com/rkskekzzz/overlaygent/blob/main/docs/SUPPORT.md`.
 - [ ] Decide pricing and distribution regions.
   - Required for App Store. Useful for direct beta positioning too.
 - [ ] Decide provider policy.
   - Options: bring-your-own-key only, bundled provider later, or both.
 - [ ] Decide whether direct beta is public, private link, or invite-only.
-- [ ] Provide local signing/notarization access.
+- [x] Provide local signing/notarization access.
   - Examples: Xcode signed into the right team, Developer ID certificate in
     Keychain, notarytool profile, or App Store Connect API key configured
     locally.
+  - Developer ID Application certificate is installed locally:
+    `Developer ID Application: suhyoung shin (54PCB24H6S)`.
+  - Notarization profile is configured locally and verified with `notarytool`.
 
 ## Track 2: Agent-Owned Release Packaging
 
 These tasks can be implemented once Track 1 has the required inputs.
 
-- [ ] Add production bundle metadata.
+- [x] Add production bundle metadata.
   - Create durable release `Info.plist` or generation script.
   - Include production bundle id, version/build, minimum macOS, display name.
+  - Release script defaults to `com.suhshin.overlaygent` and app name
+    `Overlaygent`.
 - [ ] Add app icon assets.
   - Need `.icns` for direct distribution and App Store screenshots/branding.
-- [ ] Add release build script.
+- [x] Add release build script.
   - Build release binary, assemble `.app`, inject version, verify contents.
-- [ ] Add Developer ID signing support.
+- [x] Add Developer ID signing support.
   - Use hardened runtime.
   - Avoid local-dev identity fallback for release builds.
-- [ ] Add notarization script.
+- [x] Add notarization script.
   - Submit with `notarytool`, wait for result, staple ticket, verify.
-- [ ] Add DMG packaging.
+- [x] Add DMG packaging.
   - Produce a repeatable `Overlaygent-x.y.z.dmg`.
-- [ ] Add release verification script.
+- [x] Add release verification script.
   - Expected gates: `codesign --verify`, `spctl --assess`, `stapler validate`,
     launch smoke, checksum generation.
-- [ ] Separate dev and release artifacts.
+- [x] Separate dev and release artifacts.
   - Keep `scripts/build-dev-app.sh` useful for local iteration.
   - Add explicit release scripts so dev bundle settings never leak to public
     artifacts.
@@ -122,22 +132,20 @@ These tasks can be implemented once Track 1 has the required inputs.
 
 These are blockers before a trust-sensitive public beta.
 
-- [!] Align clipboard fallback policy with UI copy.
-  - Current code wires live runs with `allowClipboardFallback: true`.
-  - Current privacy copy says clipboard fallback is opt-in.
-  - Decide and implement the real default.
-- [!] Add response cache policy.
-  - Current cache stores raw LLM responses for 30 days.
-  - Raw responses may contain user-written text in `original` or `fullRewrite`.
-  - Needed: opt-in/default-off decision, shorter TTL or disable option, clear
-    cache UI, privacy copy update.
+- [x] Align clipboard fallback policy with UI copy.
+  - Decision: disabled by default; a future settings surface may provide explicit opt-in.
+  - Live runs now use `allowClipboardFallback: false` and privacy copy matches.
+- [x] Add response cache policy.
+  - Decision: disabled by default for public builds because responses may contain user text.
+  - Live correction runs now use the no-op cache and privacy copy documents non-retention.
 - [ ] Add local data deletion controls.
   - Clear provider settings, agent profiles, memory, and response cache where
     appropriate.
 - [ ] Add App Rules UI.
   - The Dashboard has an App Rules section, but it is currently a placeholder.
   - Needed: enable/disable per app, visible current app, persisted rules.
-- [ ] Add explicit third-party AI disclosure in product copy.
+- [x] Add explicit third-party AI disclosure in product copy.
+  - Privacy copy states that the configured provider processes request data under its own terms.
   - The user-selected provider receives the current input and selected context.
 - [ ] Review logs for sensitive text leaks.
   - Verify raw input, API keys, provider responses, and context are not logged.
@@ -236,14 +244,45 @@ Verified on 2026-06-29 KST:
 - [!] Working tree has uncommitted code/script changes unrelated to this
   checklist.
 
+Verified on 2026-06-30 KST:
+
+- [x] `security find-identity -v -p codesigning`
+  - Result observed: `Developer ID Application: suhyoung shin (54PCB24H6S)`.
+- [x] `bash -n scripts/build-release-app.sh`
+- [x] `bash -n scripts/package-release-dmg.sh`
+- [x] `bash -n scripts/notarize-release-dmg.sh`
+- [x] `bash -n scripts/verify-release-artifacts.sh`
+- [x] `git diff --check`
+- [x] `scripts/build-release-app.sh`
+  - Result observed: `.build/release-app/Overlaygent.app` built with bundle id
+    `com.suhshin.overlaygent`, hardened runtime, Developer ID timestamp, and
+    valid code signature.
+- [x] `scripts/package-release-dmg.sh`
+  - Result observed: `.build/dist/Overlaygent-0.1.0+1.dmg` created, signed, and
+    SHA-256 checksum generated.
+- [x] `OVERLAYGENT_NOTARY_PROFILE=my-notary scripts/notarize-release-dmg.sh`
+  - Submission ID: `b81a83c5-06bd-4138-83f1-8ffbe4cdf320`.
+  - Result observed: Apple notarization status `Accepted`, DMG stapled, and
+    Gatekeeper accepted with `source=Notarized Developer ID`.
+- [x] `scripts/verify-release-artifacts.sh`
+  - Result observed: `.build/release-app/Overlaygent.app` and
+    `.build/dist/Overlaygent-0.1.0+1.dmg` both accepted with
+    `source=Notarized Developer ID`.
+- [x] `.build/dist/Overlaygent-0.1.0+1.dmg.sha256`
+  - SHA-256:
+    `7822b19bfb7d2b4cbd3ffd4ab57c37208fdda76895862ad7f8551851a1785fa8`.
+
 ## Immediate Next Steps
 
 - [x] User: confirm release channel for first public build.
   - Decision: website distribution as a notarized DMG.
-- [ ] User: enroll or confirm Apple Developer Program access.
-- [ ] User: choose production bundle id.
-- [ ] User: provide Privacy Policy URL and Support URL, or ask agent to draft
+- [x] User: enroll or confirm Apple Developer Program access.
+- [x] User: choose production bundle id.
+  - Decision: `com.suhshin.overlaygent`.
+- [x] User: provide Privacy Policy URL and Support URL, or ask agent to draft
   local `PRIVACY.md` and `SUPPORT.md` first.
-- [ ] Agent: implement release packaging and notarization pipeline after signing
+- [x] User: create local notarytool profile or provide App Store Connect API key
+  configuration locally.
+- [x] Agent: implement release packaging and notarization pipeline after signing
   access exists.
 - [ ] Agent: fix privacy hardening blockers before the first public artifact.

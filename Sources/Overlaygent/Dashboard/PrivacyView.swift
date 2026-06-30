@@ -32,12 +32,17 @@ struct PrivacyCopy: Equatable {
             DashboardCopySection(
                 title: "Provider Requests",
                 systemImageName: "server.rack",
-                body: "The LLM provider receives the current input, active agent instructions, selected memory, and any opt-in context. Your API key is stored separately and is used only for the provider you configure."
+                body: "Your configured third-party LLM provider receives the current input, active agent instructions, selected memory, and any opt-in context. The provider processes that data under its own terms and privacy policy. Your API key is stored separately and is used only for the provider you configure."
             ),
             DashboardCopySection(
                 title: "Clipboard Fallback",
                 systemImageName: "doc.on.clipboard",
-                body: "Clipboard fallback is opt-in and only used when direct Accessibility edits are not available."
+                body: "Clipboard fallback is disabled by default and is only used after explicit opt-in when direct Accessibility edits are not available."
+            ),
+            DashboardCopySection(
+                title: "Response Storage",
+                systemImageName: "externaldrive.badge.xmark",
+                body: "LLM responses are not cached by default. Overlaygent does not retain correction responses after the current run ends."
             )
         ]
     )

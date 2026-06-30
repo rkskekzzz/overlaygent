@@ -55,14 +55,14 @@ struct AppEnvironment {
             providerConfigLoader: SeededLLMProviderConfigLoader(providerStore: llmProviderStore),
             apiKeyStore: apiKeyStore,
             llmProvider: OpenAICompatibleProvider(),
-            responseCache: SQLiteLLMResponseCache()
+            responseCache: NoopLLMResponseCache()
         )
         let runActiveAgentsCoordinator = RunActiveAgentsCoordinator(
             requestFactory: requestFactory,
             correctionEngine: correctionEngine,
             overlayPresenter: OverlayController(),
             suggestionApplyCoordinator: SuggestionApplyCoordinator(),
-            privacyOptions: AgentRunPrivacyOptions(allowClipboardFallback: true),
+            privacyOptions: AgentRunPrivacyOptions(allowClipboardFallback: false),
             logger: logger.log
         )
         let activeAgentRunTaskController = ActiveAgentRunTaskController(

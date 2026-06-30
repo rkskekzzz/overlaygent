@@ -20,8 +20,13 @@ final class OnboardingPrivacyCopyTests: XCTestCase {
         XCTAssertContains(text, "conversation context is opt-in")
         XCTAssertContains(text, "current input")
         XCTAssertContains(text, "llm provider receives")
+        XCTAssertContains(text, "third party llm provider")
+        XCTAssertContains(text, "own terms and privacy policy")
         XCTAssertContains(text, "api key")
-        XCTAssertContains(text, "clipboard fallback is opt-in")
+        XCTAssertContains(text, "clipboard fallback is disabled by default")
+        XCTAssertContains(text, "explicit opt-in")
+        XCTAssertContains(text, "llm responses are not cached by default")
+        XCTAssertContains(text, "does not retain correction responses")
     }
 
     private func XCTAssertContains(
