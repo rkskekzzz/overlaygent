@@ -77,6 +77,8 @@ business decisions.
   - Current dev bundle id is `com.polar.OverlaygentDev`.
 - [x] Confirm final public app name.
   - Decision: `Overlaygent`.
+- [x] Choose open-source license.
+  - Decision: MIT License.
 - [x] Prepare Privacy Policy URL.
   - Must cover: current input text, optional visible conversation context, LLM
     provider sharing, local API key storage, local cache/retention/deletion,

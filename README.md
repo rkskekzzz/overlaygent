@@ -8,6 +8,10 @@ Minimal Swift/AppKit scaffold for the Overlaygent macOS menu bar app.
 - [Support](docs/SUPPORT.md)
 - [Public release checklist](PUBLIC_RELEASE_CHECKLIST.md)
 
+## License
+
+Overlaygent is released under the [MIT License](LICENSE).
+
 ## Build
 
 ```sh
