@@ -74,7 +74,7 @@ final class LLMProviderStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadProviders(), providers)
     }
 
-    func testSavedJSONDoesNotContainPlaintextAPIKeyField() throws {
+    func testSavedJSONDoesNotContainPlaintextSecret() throws {
         let provider = LLMProviderConfig.defaultOpenAICompatible(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
         )
@@ -84,8 +84,8 @@ final class LLMProviderStoreTests: XCTestCase {
 
         let data = try Data(contentsOf: store.fileURL)
         let json = String(decoding: data, as: UTF8.self)
-        XCTAssertFalse(json.contains("apiKey"))
         XCTAssertFalse(json.contains("api_key"))
+        XCTAssertFalse(json.contains("sk-"))
     }
 
     func testDefaultProviderUsesStableKeychainServicePrefix() {
@@ -95,6 +95,22 @@ final class LLMProviderStoreTests: XCTestCase {
         XCTAssertEqual(
             provider.keychainServiceName,
             "Overlaygent.LLMProvider.00000000-0000-0000-0000-000000000103"
+        )
+    }
+
+    func testDefaultChatGPTSubscriptionProviderUsesSubscriptionAuth() {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000104")!
+        let provider = LLMProviderConfig.defaultChatGPTSubscription(id: id)
+
+        XCTAssertEqual(provider.category, .subscription)
+        XCTAssertEqual(provider.kind, .chatGPTSubscription)
+        XCTAssertEqual(provider.auth.mode, .subscriptionOAuth)
+        XCTAssertEqual(provider.auth.subscriptionService, .chatGPT)
+        XCTAssertEqual(provider.endpoint.wireAPI, .codexBackendResponses)
+        XCTAssertEqual(provider.baseURL, URL(string: "https://chatgpt.com/backend-api/codex"))
+        XCTAssertEqual(
+            provider.keychainServiceName,
+            "Overlaygent.ChatGPTSubscription.00000000-0000-0000-0000-000000000104"
         )
     }
 

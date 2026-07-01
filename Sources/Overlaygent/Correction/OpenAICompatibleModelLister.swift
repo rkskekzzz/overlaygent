@@ -3,7 +3,7 @@ import Foundation
 protocol LLMProviderModelListing {
     func listModels(
         provider: LLMProviderConfig,
-        apiKey: String?
+        credential: LLMCredential
     ) async throws -> [String]
 }
 
@@ -21,18 +21,18 @@ struct OpenAICompatibleModelLister: LLMProviderModelListing {
 
     func listModels(
         provider: LLMProviderConfig,
-        apiKey: String?
+        credential: LLMCredential
     ) async throws -> [String] {
-        let normalizedAPIKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard normalizedAPIKey.isEmpty == false else {
-            throw LLMProviderError.missingAPIKey
+        let bearerToken = try bearerToken(from: credential)
+        guard bearerToken.isEmpty == false else {
+            throw LLMProviderError.missingCredential
         }
 
         let endpointURL = try modelListURL(for: provider.baseURL)
         var request = URLRequest(url: endpointURL, timeoutInterval: provider.timeoutSeconds)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(normalizedAPIKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
 
         let data: Data
         let response: HTTPURLResponse
@@ -47,7 +47,7 @@ struct OpenAICompatibleModelLister: LLMProviderModelListing {
         guard (200...299).contains(response.statusCode) else {
             throw LLMProviderError.httpStatus(
                 response.statusCode,
-                message: safeErrorMessage(from: data, redacting: normalizedAPIKey)
+                message: safeErrorMessage(from: data, redactionRules: credential.redactionRules)
             )
         }
 
@@ -91,7 +91,16 @@ struct OpenAICompatibleModelLister: LLMProviderModelListing {
         return url
     }
 
-    private func safeErrorMessage(from data: Data, redacting apiKey: String) -> String? {
+    private func bearerToken(from credential: LLMCredential) throws -> String {
+        switch credential {
+        case .apiKey(let apiKey), .bearerToken(let apiKey):
+            return apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .chatGPTSubscription, .none:
+            throw LLMProviderError.unsupportedCredential
+        }
+    }
+
+    private func safeErrorMessage(from data: Data, redactionRules: [String]) -> String? {
         guard data.isEmpty == false else {
             return nil
         }
@@ -101,7 +110,7 @@ struct OpenAICompatibleModelLister: LLMProviderModelListing {
             return nil
         }
 
-        let redactedMessage = SafeLogger.redacted(decodedMessage, redactionRules: [apiKey])
+        let redactedMessage = SafeLogger.redacted(decodedMessage, redactionRules: redactionRules)
         let collapsedMessage = redactedMessage
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { $0.isEmpty == false }

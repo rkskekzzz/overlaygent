@@ -61,6 +61,31 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertEqual(try keychainStore.readAPIKey(for: secondProvider), "second-secret")
     }
 
+    func testChatGPTSubscriptionCredentialRoundTripsSeparatelyFromAPIKey() throws {
+        let itemStore = InMemoryKeychainItemStore()
+        let keychainStore = KeychainStore(itemStore: itemStore)
+        let provider = LLMProviderConfig.defaultChatGPTSubscription(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000701")!
+        )
+        let credential = ChatGPTSubscriptionCredential(
+            accessToken: "access-token",
+            accountID: "account-id",
+            expiresAt: Date(timeIntervalSince1970: 1_800_000_000),
+            sourceDescription: "/Users/example/.codex/auth.json"
+        )
+
+        try keychainStore.saveAPIKey("sk-api-secret", serviceName: provider.keychainServiceName)
+        try keychainStore.saveChatGPTSubscriptionCredential(credential, for: provider)
+
+        XCTAssertEqual(try keychainStore.readAPIKey(serviceName: provider.keychainServiceName), "sk-api-secret")
+        XCTAssertEqual(try keychainStore.readChatGPTSubscriptionCredential(for: provider), credential)
+
+        try keychainStore.deleteChatGPTSubscriptionCredential(for: provider)
+
+        XCTAssertNil(try keychainStore.readChatGPTSubscriptionCredential(for: provider))
+        XCTAssertEqual(try keychainStore.readAPIKey(serviceName: provider.keychainServiceName), "sk-api-secret")
+    }
+
     func testDeleteAPIKeyRemovesStoredSecretAndIsIdempotent() throws {
         let itemStore = InMemoryKeychainItemStore()
         let keychainStore = KeychainStore(itemStore: itemStore)

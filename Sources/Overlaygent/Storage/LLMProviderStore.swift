@@ -51,6 +51,8 @@ extension LLMProviderConfig {
         LLMProviderConfig(
             id: id,
             name: name,
+            category: .api,
+            kind: .openAICompatibleAPI,
             baseURL: baseURL,
             defaultModel: defaultModel,
             reasoningEffort: reasoningEffort,
@@ -58,6 +60,43 @@ extension LLMProviderConfig {
             maxTokens: maxTokens,
             timeoutSeconds: timeoutSeconds,
             keychainServiceName: "Overlaygent.LLMProvider.\(id.uuidString)"
+        )
+    }
+
+    static func defaultChatGPTSubscription(
+        id: UUID = UUID(),
+        name: String = "ChatGPT Subscription",
+        baseURL: URL = URL(string: "https://chatgpt.com/backend-api/codex")!,
+        defaultModel: String = "gpt-5.2",
+        reasoningEffort: ReasoningEffort? = nil,
+        temperature: Double = 0.2,
+        maxTokens: Int = 1_200,
+        timeoutSeconds: Double = 30
+    ) -> LLMProviderConfig {
+        LLMProviderConfig(
+            id: id,
+            name: name,
+            category: .subscription,
+            kind: .chatGPTSubscription,
+            endpoint: LLMProviderEndpointConfig(
+                baseURL: baseURL,
+                wireAPI: .codexBackendResponses,
+                extraHeaders: [:]
+            ),
+            auth: LLMProviderAuthConfig(
+                mode: .subscriptionOAuth,
+                keychainServiceName: "Overlaygent.ChatGPTSubscription.\(id.uuidString)",
+                subscriptionService: .chatGPT,
+                profileID: "default",
+                credentialCommand: nil
+            ),
+            baseURL: baseURL,
+            defaultModel: defaultModel,
+            reasoningEffort: reasoningEffort,
+            temperature: temperature,
+            maxTokens: maxTokens,
+            timeoutSeconds: timeoutSeconds,
+            keychainServiceName: "Overlaygent.ChatGPTSubscription.\(id.uuidString)"
         )
     }
 }

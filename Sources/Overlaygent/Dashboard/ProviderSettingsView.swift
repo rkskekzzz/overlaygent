@@ -7,12 +7,16 @@ struct ProviderSettingsView: View {
     init(
         store: LLMProviderStore = LLMProviderStore(),
         apiKeyStore: any LLMProviderAPIKeyStoring = KeychainStore(),
-        modelLister: any LLMProviderModelListing = OpenAICompatibleModelLister()
+        chatGPTCredentialStore: (any ChatGPTSubscriptionCredentialStoring)? = nil,
+        chatGPTCredentialImporter: any ChatGPTSubscriptionCredentialImporting = CodexAuthFileImporter(),
+        modelLister: any LLMProviderModelListing = LLMProviderModelListerRouter()
     ) {
         _viewModel = StateObject(
             wrappedValue: ProviderSettingsViewModel(
                 store: store,
                 apiKeyStore: apiKeyStore,
+                chatGPTCredentialStore: chatGPTCredentialStore,
+                chatGPTCredentialImporter: chatGPTCredentialImporter,
                 modelLister: modelLister
             )
         )
@@ -23,8 +27,20 @@ struct ProviderSettingsView: View {
             overview
                 .toolbar {
                     ToolbarItem {
-                        Button {
-                            addAndOpenProvider()
+                        Menu {
+                            Button {
+                                addAndOpenChatGPTSubscription()
+                            } label: {
+                                Label("ChatGPT Subscription", systemImage: "person.crop.circle.badge.checkmark")
+                            }
+
+                            Divider()
+
+                            Button {
+                                addAndOpenProvider()
+                            } label: {
+                                Label("OpenAI Compatible API", systemImage: "key")
+                            }
                         } label: {
                             Label("Add Provider", systemImage: "plus")
                         }
@@ -59,22 +75,31 @@ struct ProviderSettingsView: View {
                     if viewModel.providers.isEmpty {
                         EmptyProviderListCard(addProvider: addAndOpenProvider)
                     } else {
-                        ProviderSettingsListGroup {
-                            ForEach(Array(viewModel.providers.enumerated()), id: \.element.id) { index, provider in
-                                if index > 0 {
-                                    ProviderSettingsRowDivider()
-                                }
+                        ForEach(viewModel.providerCategoriesWithProviders, id: \.category.id) { group in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(group.category.displayName)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 2)
 
-                                NavigationLink(value: provider.id) {
-                                    ProviderNavigationRow(
-                                        systemImageName: "server.rack",
-                                        iconTint: .blue,
-                                        title: provider.name,
-                                        subtitle: provider.baseURL.absoluteString,
-                                        trailingText: provider.defaultModel
-                                    )
+                                ProviderSettingsListGroup {
+                                    ForEach(Array(group.providers.enumerated()), id: \.element.id) { index, provider in
+                                        if index > 0 {
+                                            ProviderSettingsRowDivider()
+                                        }
+
+                                        NavigationLink(value: provider.id) {
+                                            ProviderNavigationRow(
+                                                systemImageName: provider.systemImageName,
+                                                iconTint: provider.iconTint,
+                                                title: provider.name,
+                                                subtitle: provider.providerSubtitle,
+                                                trailingText: provider.defaultModel
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -123,6 +148,11 @@ struct ProviderSettingsView: View {
         let providerID = viewModel.addProvider()
         path = [providerID]
     }
+
+    private func addAndOpenChatGPTSubscription() {
+        let providerID = viewModel.addChatGPTSubscriptionProvider()
+        path = [providerID]
+    }
 }
 
 private struct ProviderSettingsDestinationView: View {
@@ -134,13 +164,13 @@ private struct ProviderSettingsDestinationView: View {
         if let provider = viewModel.binding(for: providerID) {
             ProviderSettingsDetailPage(
                 title: provider.wrappedValue.name,
-                subtitle: "\(provider.wrappedValue.defaultModel) - \(provider.wrappedValue.baseURL.absoluteString)",
-                systemImageName: "server.rack",
-                iconTint: .blue
+                subtitle: provider.wrappedValue.detailSubtitle,
+                systemImageName: provider.wrappedValue.systemImageName,
+                iconTint: provider.wrappedValue.iconTint
             ) {
                 VStack(alignment: .leading, spacing: 16) {
                     ProviderStatusStrip(
-                        hasStoredAPIKey: viewModel.selectedProviderHasStoredAPIKey,
+                        credentialStatus: viewModel.selectedProviderCredentialStatus,
                         hasUnsavedChanges: viewModel.hasUnsavedChanges
                     )
 
@@ -148,6 +178,8 @@ private struct ProviderSettingsDestinationView: View {
                         provider: provider,
                         apiKeyDraft: $viewModel.apiKeyDraft,
                         hasStoredAPIKey: viewModel.selectedProviderHasStoredAPIKey,
+                        isSubscriptionProvider: provider.wrappedValue.category == .subscription,
+                        chatGPTAccountID: viewModel.selectedChatGPTAccountID,
                         availableModelIDs: viewModel.availableModelIDs(for: providerID),
                         isLoadingModelList: viewModel.isLoadingModelList,
                         refreshModels: {
@@ -160,6 +192,12 @@ private struct ProviderSettingsDestinationView: View {
                         },
                         deleteAPIKey: {
                             viewModel.deleteSelectedAPIKey()
+                        },
+                        importChatGPTSubscription: {
+                            viewModel.importSelectedChatGPTSubscription()
+                        },
+                        disconnectChatGPTSubscription: {
+                            viewModel.disconnectSelectedChatGPTSubscription()
                         }
                     )
                     .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
@@ -412,16 +450,16 @@ private struct EmptyProviderListCard: View {
 }
 
 private struct ProviderStatusStrip: View {
-    let hasStoredAPIKey: Bool
+    let credentialStatus: ProviderCredentialStatus
     let hasUnsavedChanges: Bool
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
                 ProviderStatusPill(
-                    systemImageName: hasStoredAPIKey ? "key.fill" : "key.slash",
-                    text: hasStoredAPIKey ? "API Key Stored" : "No API Key",
-                    tint: hasStoredAPIKey ? .green : .secondary
+                    systemImageName: credentialStatus.systemImageName,
+                    text: credentialStatus.text,
+                    tint: credentialStatus.tint
                 )
 
                 ProviderStatusPill(
@@ -433,9 +471,9 @@ private struct ProviderStatusStrip: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 ProviderStatusPill(
-                    systemImageName: hasStoredAPIKey ? "key.fill" : "key.slash",
-                    text: hasStoredAPIKey ? "API Key Stored" : "No API Key",
-                    tint: hasStoredAPIKey ? .green : .secondary
+                    systemImageName: credentialStatus.systemImageName,
+                    text: credentialStatus.text,
+                    tint: credentialStatus.tint
                 )
 
                 ProviderStatusPill(
@@ -553,27 +591,60 @@ private struct ProviderSettingsForm: View {
     @Binding var provider: LLMProviderConfig
     @Binding var apiKeyDraft: String
     var hasStoredAPIKey: Bool
+    var isSubscriptionProvider: Bool
+    var chatGPTAccountID: String?
     var availableModelIDs: [String]
     var isLoadingModelList: Bool
     var refreshModels: () -> Void
     var saveAPIKey: () -> Void
     var deleteAPIKey: () -> Void
+    var importChatGPTSubscription: () -> Void
+    var disconnectChatGPTSubscription: () -> Void
 
     var body: some View {
         Form {
             TextField("Provider name", text: $provider.name)
 
-            TextField(
-                "Base URL",
-                text: Binding(
-                    get: { provider.baseURL.absoluteString },
-                    set: { newValue in
-                        if let url = URL(string: newValue), url.scheme?.isEmpty == false {
-                            provider.baseURL = url
-                        }
+            if isSubscriptionProvider {
+                LabeledContent("Account") {
+                    Text(chatGPTAccountID ?? "Not connected")
+                        .foregroundStyle(chatGPTAccountID == nil ? .secondary : .primary)
+                }
+
+                HStack {
+                    Button {
+                        importChatGPTSubscription()
+                    } label: {
+                        Label(
+                            chatGPTAccountID == nil ? "Import Codex Login" : "Reimport Codex Login",
+                            systemImage: "person.crop.circle.badge.checkmark"
+                        )
                     }
+
+                    Button(role: .destructive) {
+                        disconnectChatGPTSubscription()
+                    } label: {
+                        Text("Disconnect")
+                    }
+                    .disabled(chatGPTAccountID == nil)
+                }
+
+                Text("Uses a local Codex ChatGPT login token copied into macOS Keychain for this provider.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                TextField(
+                    "Base URL",
+                    text: Binding(
+                        get: { provider.baseURL.absoluteString },
+                        set: { newValue in
+                            if let url = URL(string: newValue), url.scheme?.isEmpty == false {
+                                provider.baseURL = url
+                            }
+                        }
+                    )
                 )
-            )
+            }
 
             HStack {
                 TextField("Default model", text: $provider.defaultModel)
@@ -617,31 +688,33 @@ private struct ProviderSettingsForm: View {
 
             TextField("Timeout seconds", value: $provider.timeoutSeconds, formatter: Self.timeoutFormatter)
 
-            SecureField(apiKeyFieldTitle, text: $apiKeyDraft)
+            if isSubscriptionProvider == false {
+                SecureField(apiKeyFieldTitle, text: $apiKeyDraft)
 
-            HStack {
-                Text(apiKeyStatusText)
+                HStack {
+                    Text(apiKeyStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button(hasStoredAPIKey ? "Update Key" : "Save Key") {
+                        saveAPIKey()
+                    }
+                    .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button(role: .destructive) {
+                        deleteAPIKey()
+                    } label: {
+                        Text("Delete Key")
+                    }
+                    .disabled(hasStoredAPIKey == false)
+                }
+
+                Text("API key is stored in macOS Keychain and is never written to provider settings.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Button(hasStoredAPIKey ? "Update Key" : "Save Key") {
-                    saveAPIKey()
-                }
-                .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Button(role: .destructive) {
-                    deleteAPIKey()
-                } label: {
-                    Text("Delete Key")
-                }
-                .disabled(hasStoredAPIKey == false)
             }
-
-            Text("API key is stored in macOS Keychain and is never written to provider settings.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -700,6 +773,39 @@ private struct ProviderSettingsForm: View {
     }()
 }
 
+struct ProviderCategoryGroup {
+    var category: LLMProviderCategory
+    var providers: [LLMProviderConfig]
+}
+
+struct ProviderCredentialStatus {
+    var systemImageName: String
+    var text: String
+    var tint: Color
+
+    static let noSelection = ProviderCredentialStatus(
+        systemImageName: "questionmark.circle",
+        text: "No Provider",
+        tint: .secondary
+    )
+
+    static func apiKey(stored: Bool) -> ProviderCredentialStatus {
+        ProviderCredentialStatus(
+            systemImageName: stored ? "key.fill" : "key.slash",
+            text: stored ? "API Key Stored" : "No API Key",
+            tint: stored ? .green : .secondary
+        )
+    }
+
+    static func chatGPT(accountID: String?) -> ProviderCredentialStatus {
+        ProviderCredentialStatus(
+            systemImageName: accountID == nil ? "person.crop.circle.badge.exclamationmark" : "person.crop.circle.badge.checkmark",
+            text: accountID == nil ? "Login Required" : "ChatGPT Connected",
+            tint: accountID == nil ? .secondary : .green
+        )
+    }
+}
+
 @MainActor
 final class ProviderSettingsViewModel: ObservableObject {
     @Published var providers: [LLMProviderConfig] = []
@@ -717,11 +823,15 @@ final class ProviderSettingsViewModel: ObservableObject {
     @Published var hasUnsavedChanges = false
     @Published var apiKeyDraft = ""
     @Published var selectedProviderHasStoredAPIKey = false
+    @Published var selectedChatGPTAccountID: String?
     @Published var modelIDsByProviderID: [LLMProviderConfig.ID: [String]] = [:]
     @Published var isLoadingModelList = false
 
     private let store: LLMProviderStore
     private let apiKeyStore: any LLMProviderAPIKeyStoring
+    private let chatGPTCredentialStore: any ChatGPTSubscriptionCredentialStoring
+    private let chatGPTCredentialImporter: any ChatGPTSubscriptionCredentialImporting
+    private let credentialResolver: any LLMProviderCredentialResolving
     private let modelLister: any LLMProviderModelListing
     private var hasLoaded = false
     private var lastSavedProviders: [LLMProviderConfig] = []
@@ -730,11 +840,58 @@ final class ProviderSettingsViewModel: ObservableObject {
     init(
         store: LLMProviderStore,
         apiKeyStore: any LLMProviderAPIKeyStoring = KeychainStore(),
-        modelLister: any LLMProviderModelListing = OpenAICompatibleModelLister()
+        chatGPTCredentialStore: (any ChatGPTSubscriptionCredentialStoring)? = nil,
+        chatGPTCredentialImporter: any ChatGPTSubscriptionCredentialImporting = CodexAuthFileImporter(),
+        credentialResolver: (any LLMProviderCredentialResolving)? = nil,
+        modelLister: any LLMProviderModelListing = LLMProviderModelListerRouter()
     ) {
         self.store = store
         self.apiKeyStore = apiKeyStore
+        let resolvedChatGPTCredentialStore = chatGPTCredentialStore
+            ?? apiKeyStore as? any ChatGPTSubscriptionCredentialStoring
+            ?? NoopChatGPTSubscriptionCredentialStore()
+        self.chatGPTCredentialStore = resolvedChatGPTCredentialStore
+        self.chatGPTCredentialImporter = chatGPTCredentialImporter
+        self.credentialResolver = credentialResolver ?? DefaultLLMProviderCredentialResolver(
+            apiKeyStore: apiKeyStore,
+            chatGPTCredentialStore: resolvedChatGPTCredentialStore
+        )
         self.modelLister = modelLister
+    }
+
+    var providerCategoriesWithProviders: [ProviderCategoryGroup] {
+        LLMProviderCategory.allCases.compactMap { category in
+            let categoryProviders = providers.filter { $0.category == category }
+            guard categoryProviders.isEmpty == false else {
+                return nil
+            }
+            return ProviderCategoryGroup(category: category, providers: categoryProviders)
+        }
+    }
+
+    var selectedProviderCredentialStatus: ProviderCredentialStatus {
+        guard let selectedProvider else {
+            return .noSelection
+        }
+
+        switch selectedProvider.auth.mode {
+        case .subscriptionOAuth:
+            return .chatGPT(accountID: selectedChatGPTAccountID)
+        case .apiKey:
+            return .apiKey(stored: selectedProviderHasStoredAPIKey)
+        case .bearerTokenCommand:
+            return ProviderCredentialStatus(
+                systemImageName: "terminal",
+                text: "Command Auth",
+                tint: .secondary
+            )
+        case .none:
+            return ProviderCredentialStatus(
+                systemImageName: "lock.open",
+                text: "No Auth",
+                tint: .secondary
+            )
+        }
     }
 
     var selectedProviderBinding: Binding<LLMProviderConfig>? {
@@ -795,12 +952,24 @@ final class ProviderSettingsViewModel: ObservableObject {
             hasError = true
             apiKeyDraft = ""
             selectedProviderHasStoredAPIKey = false
+            selectedChatGPTAccountID = nil
         }
     }
 
     @discardableResult
     func addProvider() -> LLMProviderConfig.ID {
         let provider = LLMProviderConfig.defaultOpenAICompatible(name: uniqueProviderName())
+        providers.append(provider)
+        selectedProviderID = provider.id
+        hasUnsavedChanges = true
+        statusMessage = nil
+        hasError = false
+        return provider.id
+    }
+
+    @discardableResult
+    func addChatGPTSubscriptionProvider() -> LLMProviderConfig.ID {
+        let provider = LLMProviderConfig.defaultChatGPTSubscription(name: uniqueChatGPTSubscriptionProviderName())
         providers.append(provider)
         selectedProviderID = provider.id
         hasUnsavedChanges = true
@@ -863,6 +1032,12 @@ final class ProviderSettingsViewModel: ObservableObject {
             return
         }
 
+        guard provider.auth.mode == .apiKey else {
+            statusMessage = "This provider does not use API key authentication."
+            hasError = true
+            return
+        }
+
         let apiKey = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard apiKey.isEmpty == false else {
             statusMessage = "Enter an API key before saving."
@@ -889,6 +1064,12 @@ final class ProviderSettingsViewModel: ObservableObject {
             return
         }
 
+        guard provider.auth.mode == .apiKey else {
+            statusMessage = "This provider does not use API key authentication."
+            hasError = true
+            return
+        }
+
         do {
             try apiKeyStore.deleteAPIKey(for: provider)
             apiKeyDraft = ""
@@ -901,6 +1082,56 @@ final class ProviderSettingsViewModel: ObservableObject {
         }
     }
 
+    func importSelectedChatGPTSubscription() {
+        guard let provider = selectedProvider else {
+            statusMessage = "Select a provider before importing ChatGPT login."
+            hasError = true
+            return
+        }
+
+        guard provider.auth.subscriptionService == .chatGPT else {
+            statusMessage = "This provider is not a ChatGPT subscription provider."
+            hasError = true
+            return
+        }
+
+        do {
+            let credential = try chatGPTCredentialImporter.importCredential()
+            try chatGPTCredentialStore.saveChatGPTSubscriptionCredential(credential, for: provider)
+            selectedChatGPTAccountID = credential.accountID
+            statusMessage = "Imported ChatGPT subscription login to Keychain."
+            hasError = false
+        } catch {
+            selectedChatGPTAccountID = nil
+            statusMessage = "Could not import ChatGPT login: \(error.localizedDescription)"
+            hasError = true
+        }
+    }
+
+    func disconnectSelectedChatGPTSubscription() {
+        guard let provider = selectedProvider else {
+            statusMessage = "Select a provider before disconnecting ChatGPT login."
+            hasError = true
+            return
+        }
+
+        guard provider.auth.subscriptionService == .chatGPT else {
+            statusMessage = "This provider is not a ChatGPT subscription provider."
+            hasError = true
+            return
+        }
+
+        do {
+            try chatGPTCredentialStore.deleteChatGPTSubscriptionCredential(for: provider)
+            selectedChatGPTAccountID = nil
+            statusMessage = "Disconnected ChatGPT subscription login."
+            hasError = false
+        } catch {
+            statusMessage = "Could not disconnect ChatGPT login: \(error.localizedDescription)"
+            hasError = true
+        }
+    }
+
     func refreshSelectedProviderModels() async {
         guard let provider = selectedProvider else {
             statusMessage = "Select a provider before refreshing models."
@@ -908,18 +1139,21 @@ final class ProviderSettingsViewModel: ObservableObject {
             return
         }
 
-        let apiKey: String
+        let credential: LLMCredential
         do {
-            apiKey = try apiKeyStore.readAPIKey(for: provider)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        } catch {
-            statusMessage = "Could not load API key for model refresh: \(error.localizedDescription)"
+            credential = try await credentialResolver.credential(for: provider)
+        } catch let error as LLMProviderCredentialError {
+            if provider.auth.mode == .subscriptionOAuth {
+                statusMessage = "Import ChatGPT login before refreshing models."
+            } else if error == .missingCredential(mode: .apiKey) {
+                statusMessage = "Save an API key before refreshing models."
+            } else {
+                statusMessage = "Could not load provider credential for model refresh: \(error.localizedDescription)"
+            }
             hasError = true
             return
-        }
-
-        guard apiKey.isEmpty == false else {
-            statusMessage = "Save an API key before refreshing models."
+        } catch {
+            statusMessage = "Could not load provider credential for model refresh: \(error.localizedDescription)"
             hasError = true
             return
         }
@@ -929,7 +1163,7 @@ final class ProviderSettingsViewModel: ObservableObject {
         hasError = false
 
         do {
-            let modelIDs = try await modelLister.listModels(provider: provider, apiKey: apiKey)
+            let modelIDs = try await modelLister.listModels(provider: provider, credential: credential)
             modelIDsByProviderID[provider.id] = modelIDs
             statusMessage = modelIDs.isEmpty
                 ? "No models were returned for this provider."
@@ -968,6 +1202,7 @@ final class ProviderSettingsViewModel: ObservableObject {
 
         for provider in providersToDelete {
             try apiKeyStore.deleteAPIKey(for: provider)
+            try chatGPTCredentialStore.deleteChatGPTSubscriptionCredential(for: provider)
         }
     }
 
@@ -987,21 +1222,53 @@ final class ProviderSettingsViewModel: ObservableObject {
 
         guard let provider = selectedProvider else {
             selectedProviderHasStoredAPIKey = false
+            selectedChatGPTAccountID = nil
             return
         }
 
+        selectedChatGPTAccountID = nil
+
         do {
-            let storedAPIKey = try apiKeyStore.readAPIKey(for: provider)
-            selectedProviderHasStoredAPIKey = storedAPIKey?.isEmpty == false
+            if provider.auth.mode == .apiKey {
+                let storedAPIKey = try apiKeyStore.readAPIKey(for: provider)
+                selectedProviderHasStoredAPIKey = storedAPIKey?.isEmpty == false
+            } else {
+                selectedProviderHasStoredAPIKey = false
+            }
+
+            if provider.auth.subscriptionService == .chatGPT {
+                let credential = try chatGPTCredentialStore
+                    .readChatGPTSubscriptionCredential(for: provider)
+                selectedChatGPTAccountID = credential?.isUsable == true
+                    ? credential?.accountID
+                    : nil
+            }
         } catch {
             selectedProviderHasStoredAPIKey = false
-            statusMessage = "Could not load API key status: \(error.localizedDescription)"
+            selectedChatGPTAccountID = nil
+            statusMessage = "Could not load provider credential status: \(error.localizedDescription)"
             hasError = true
         }
     }
 
     private func uniqueProviderName() -> String {
         let baseName = "OpenAI Compatible"
+        let existingNames = Set(providers.map(\.name))
+
+        guard existingNames.contains(baseName) else {
+            return baseName
+        }
+
+        var suffix = 2
+        while existingNames.contains("\(baseName) \(suffix)") {
+            suffix += 1
+        }
+
+        return "\(baseName) \(suffix)"
+    }
+
+    private func uniqueChatGPTSubscriptionProviderName() -> String {
+        let baseName = "ChatGPT Subscription"
         let existingNames = Set(providers.map(\.name))
 
         guard existingNames.contains(baseName) else {
@@ -1024,6 +1291,41 @@ private extension LLMProviderConfig {
             name: "Deleted Provider",
             defaultModel: ""
         )
+    }
+
+    var systemImageName: String {
+        switch kind {
+        case .chatGPTSubscription:
+            return "person.crop.circle.badge.checkmark"
+        case .openAICompatibleAPI:
+            return "key"
+        case .localOpenAICompatible:
+            return "desktopcomputer"
+        }
+    }
+
+    var iconTint: Color {
+        switch category {
+        case .subscription:
+            return .green
+        case .api:
+            return .blue
+        case .local:
+            return .purple
+        }
+    }
+
+    var providerSubtitle: String {
+        switch kind {
+        case .chatGPTSubscription:
+            return "ChatGPT account subscription"
+        case .openAICompatibleAPI, .localOpenAICompatible:
+            return baseURL.absoluteString
+        }
+    }
+
+    var detailSubtitle: String {
+        "\(defaultModel) - \(providerSubtitle)"
     }
 }
 

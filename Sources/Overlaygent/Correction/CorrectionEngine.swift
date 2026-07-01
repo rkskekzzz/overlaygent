@@ -10,6 +10,9 @@ enum AgentCorrectionFailure: Error, Equatable, CustomStringConvertible {
     case missingProvider(providerID: UUID)
     case missingAPIKey(providerID: UUID)
     case apiKeyLoadFailed(providerID: UUID)
+    case missingCredential(providerID: UUID, mode: LLMProviderAuthMode)
+    case credentialLoadFailed(providerID: UUID, reason: String)
+    case loginRequired(providerID: UUID)
     case providerFailed(providerID: UUID, reason: String)
     case parseFailed(providerID: UUID)
 
@@ -21,6 +24,12 @@ enum AgentCorrectionFailure: Error, Equatable, CustomStringConvertible {
             return "LLM provider API key is missing for provider \(providerID.uuidString)."
         case .apiKeyLoadFailed(let providerID):
             return "LLM provider API key could not be loaded for provider \(providerID.uuidString)."
+        case let .missingCredential(providerID, mode):
+            return "LLM provider credential is missing for provider \(providerID.uuidString) using \(mode.rawValue) auth."
+        case let .credentialLoadFailed(providerID, reason):
+            return "LLM provider credential could not be loaded for provider \(providerID.uuidString): \(reason)"
+        case .loginRequired(let providerID):
+            return "LLM provider requires ChatGPT subscription login for provider \(providerID.uuidString)."
         case let .providerFailed(providerID, reason):
             return "LLM provider request failed for provider \(providerID.uuidString): \(reason)"
         case .parseFailed(let providerID):
@@ -50,7 +59,7 @@ protocol AgentCorrectionRuntime {
 }
 
 struct LLMProviderCorrectionRuntime: AgentCorrectionRuntime {
-    private let apiKeyStore: any LLMProviderAPIKeyStoring
+    private let credentialResolver: any LLMProviderCredentialResolving
     private let llmProvider: any LLMProvider
     private let responseCache: any LLMResponseCaching
     private let responseCacheKeyFactory: any LLMResponseCacheKeyMaking
@@ -58,14 +67,14 @@ struct LLMProviderCorrectionRuntime: AgentCorrectionRuntime {
     private let now: () -> Date
 
     init(
-        apiKeyStore: any LLMProviderAPIKeyStoring,
+        credentialResolver: any LLMProviderCredentialResolving,
         llmProvider: any LLMProvider,
         responseCache: any LLMResponseCaching = NoopLLMResponseCache(),
         responseCacheKeyFactory: any LLMResponseCacheKeyMaking = LLMResponseCacheKeyFactory(),
         parser: CorrectionResultParser = CorrectionResultParser(),
         now: @escaping () -> Date = Date.init
     ) {
-        self.apiKeyStore = apiKeyStore
+        self.credentialResolver = credentialResolver
         self.llmProvider = llmProvider
         self.responseCache = responseCache
         self.responseCacheKeyFactory = responseCacheKeyFactory
@@ -94,15 +103,22 @@ struct LLMProviderCorrectionRuntime: AgentCorrectionRuntime {
             return cachedResult
         }
 
-        let apiKey: String?
+        let credential: LLMCredential
         do {
-            apiKey = try apiKeyStore.readAPIKey(for: providerConfig)
+            credential = try await credentialResolver.credential(for: providerConfig)
+        } catch let error as LLMProviderCredentialError {
+            return failedResult(
+                for: bundle,
+                failure: credentialFailure(for: bundle.providerID, provider: providerConfig, error: error)
+            )
         } catch {
-            return failedResult(for: bundle, failure: .apiKeyLoadFailed(providerID: bundle.providerID))
-        }
-
-        guard apiKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
-            return failedResult(for: bundle, failure: .missingAPIKey(providerID: bundle.providerID))
+            return failedResult(
+                for: bundle,
+                failure: .credentialLoadFailed(
+                    providerID: bundle.providerID,
+                    reason: SafeLogger.redacted(String(describing: error))
+                )
+            )
         }
 
         let rawResponse: String
@@ -110,7 +126,7 @@ struct LLMProviderCorrectionRuntime: AgentCorrectionRuntime {
             rawResponse = try await llmProvider.complete(
                 bundle: bundle,
                 provider: providerConfig,
-                apiKey: apiKey
+                credential: credential
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -177,6 +193,25 @@ struct LLMProviderCorrectionRuntime: AgentCorrectionRuntime {
 
         return SafeLogger.redacted(String(describing: error))
     }
+
+    private func credentialFailure(
+        for providerID: UUID,
+        provider: LLMProviderConfig,
+        error: LLMProviderCredentialError
+    ) -> AgentCorrectionFailure {
+        switch error {
+        case .missingCredential(let mode):
+            if provider.auth.mode == .subscriptionOAuth {
+                return .loginRequired(providerID: providerID)
+            }
+            if mode == .apiKey {
+                return .missingAPIKey(providerID: providerID)
+            }
+            return .missingCredential(providerID: providerID, mode: mode)
+        case .unsupportedAuthMode:
+            return .credentialLoadFailed(providerID: providerID, reason: error.localizedDescription)
+        }
+    }
 }
 
 struct CorrectionEngine {
@@ -188,6 +223,34 @@ struct CorrectionEngine {
     init(
         providerConfigLoader: any LLMProviderConfigLoading,
         apiKeyStore: any LLMProviderAPIKeyStoring,
+        chatGPTCredentialStore: (any ChatGPTSubscriptionCredentialStoring)? = nil,
+        llmProvider: any LLMProvider,
+        responseCache: any LLMResponseCaching = NoopLLMResponseCache(),
+        privacyGuard: PrivacyGuard = PrivacyGuard(),
+        messageFactory: AgentMessageFactory = AgentMessageFactory(),
+        parser: CorrectionResultParser = CorrectionResultParser(),
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.privacyGuard = privacyGuard
+        self.messageFactory = messageFactory
+        self.providerConfigLoader = providerConfigLoader
+        let credentialStore = chatGPTCredentialStore ?? apiKeyStore as? any ChatGPTSubscriptionCredentialStoring
+        let resolver = DefaultLLMProviderCredentialResolver(
+            apiKeyStore: apiKeyStore,
+            chatGPTCredentialStore: credentialStore ?? NoopChatGPTSubscriptionCredentialStore()
+        )
+        self.runtime = LLMProviderCorrectionRuntime(
+            credentialResolver: resolver,
+            llmProvider: llmProvider,
+            responseCache: responseCache,
+            parser: parser,
+            now: now
+        )
+    }
+
+    init(
+        providerConfigLoader: any LLMProviderConfigLoading,
+        credentialResolver: any LLMProviderCredentialResolving,
         llmProvider: any LLMProvider,
         responseCache: any LLMResponseCaching = NoopLLMResponseCache(),
         privacyGuard: PrivacyGuard = PrivacyGuard(),
@@ -199,7 +262,7 @@ struct CorrectionEngine {
         self.messageFactory = messageFactory
         self.providerConfigLoader = providerConfigLoader
         self.runtime = LLMProviderCorrectionRuntime(
-            apiKeyStore: apiKeyStore,
+            credentialResolver: credentialResolver,
             llmProvider: llmProvider,
             responseCache: responseCache,
             parser: parser,

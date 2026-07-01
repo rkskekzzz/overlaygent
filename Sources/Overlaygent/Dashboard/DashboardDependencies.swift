@@ -3,13 +3,16 @@ struct DashboardDependencies {
     var llmProviderStore: LLMProviderStore
     var orchestratorSettingsStore: OrchestratorSettingsStore
     var apiKeyStore: any LLMProviderAPIKeyStoring
+    var chatGPTCredentialStore: any ChatGPTSubscriptionCredentialStoring
 
     static var live: DashboardDependencies {
-        DashboardDependencies(
+        let keychainStore = KeychainStore()
+        return DashboardDependencies(
             agentProfileStore: .defaultStore,
             llmProviderStore: LLMProviderStore(),
             orchestratorSettingsStore: .defaultStore,
-            apiKeyStore: KeychainStore()
+            apiKeyStore: keychainStore,
+            chatGPTCredentialStore: keychainStore
         )
     }
 }

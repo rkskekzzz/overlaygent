@@ -39,6 +39,32 @@ final class ProviderSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(apiKeyStore.deletedServiceNames, [provider.keychainServiceName])
     }
 
+    func testDeletingChatGPTSubscriptionProviderDefersCredentialDeletionUntilSave() {
+        let credentialStore = InMemoryChatGPTCredentialStore()
+        let provider = LLMProviderConfig.defaultChatGPTSubscription(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000105")!
+        )
+        credentialStore.credentialsByServiceName[provider.keychainServiceName] = ChatGPTSubscriptionCredential(
+            accessToken: "access-token",
+            accountID: "account-id",
+            expiresAt: nil,
+            sourceDescription: nil
+        )
+        let viewModel = makeViewModel(chatGPTCredentialStore: credentialStore)
+        viewModel.providers = [provider]
+        viewModel.selectedProviderID = provider.id
+
+        viewModel.deleteSelectedProvider()
+
+        XCTAssertEqual(credentialStore.deletedServiceNames, [])
+        XCTAssertNotNil(credentialStore.credentialsByServiceName[provider.keychainServiceName])
+
+        viewModel.save()
+
+        XCTAssertEqual(credentialStore.deletedServiceNames, [provider.keychainServiceName])
+        XCTAssertNil(credentialStore.credentialsByServiceName[provider.keychainServiceName])
+    }
+
     func testSelectedProviderBindingUpdatesByIDAfterArrayMutation() throws {
         let first = provider(idSuffix: "201", name: "First")
         let second = provider(idSuffix: "202", name: "Second")
@@ -106,7 +132,7 @@ final class ProviderSettingsViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.availableModelIDs(for: provider.id), ["gpt-4.1-mini", "gpt-5.2"])
         XCTAssertEqual(modelLister.capturedProviders, [provider])
-        XCTAssertEqual(modelLister.capturedAPIKeys, ["sk-existing-secret"])
+        XCTAssertEqual(modelLister.capturedCredentials, [.apiKey("sk-existing-secret")])
         XCTAssertEqual(viewModel.statusMessage, "Loaded 2 models.")
         XCTAssertFalse(viewModel.hasError)
         XCTAssertFalse(viewModel.isLoadingModelList)
@@ -129,13 +155,123 @@ final class ProviderSettingsViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoadingModelList)
     }
 
+    func testAddingImportingAndDisconnectingChatGPTSubscriptionProvider() {
+        let credentialStore = InMemoryChatGPTCredentialStore()
+        let importer = MockChatGPTCredentialImporter(
+            credential: ChatGPTSubscriptionCredential(
+                accessToken: "access-token",
+                accountID: "account-id",
+                expiresAt: nil,
+                sourceDescription: "/tmp/auth.json"
+            )
+        )
+        let viewModel = makeViewModel(
+            chatGPTCredentialStore: credentialStore,
+            chatGPTCredentialImporter: importer
+        )
+
+        let providerID = viewModel.addChatGPTSubscriptionProvider()
+
+        guard let provider = viewModel.providers.first else {
+            return XCTFail("Expected provider.")
+        }
+        XCTAssertEqual(provider.id, providerID)
+        XCTAssertEqual(provider.category, .subscription)
+        XCTAssertEqual(provider.kind, .chatGPTSubscription)
+        XCTAssertEqual(viewModel.selectedProviderCredentialStatus.text, "Login Required")
+
+        viewModel.importSelectedChatGPTSubscription()
+
+        XCTAssertEqual(credentialStore.credentialsByServiceName[provider.keychainServiceName]?.accountID, "account-id")
+        XCTAssertEqual(viewModel.selectedChatGPTAccountID, "account-id")
+        XCTAssertEqual(viewModel.selectedProviderCredentialStatus.text, "ChatGPT Connected")
+        XCTAssertEqual(viewModel.statusMessage, "Imported ChatGPT subscription login to Keychain.")
+
+        viewModel.disconnectSelectedChatGPTSubscription()
+
+        XCTAssertNil(credentialStore.credentialsByServiceName[provider.keychainServiceName])
+        XCTAssertNil(viewModel.selectedChatGPTAccountID)
+        XCTAssertEqual(viewModel.selectedProviderCredentialStatus.text, "Login Required")
+    }
+
+    func testRefreshingChatGPTSubscriptionModelsUsesStoredSubscriptionCredential() async {
+        let credentialStore = InMemoryChatGPTCredentialStore()
+        let modelLister = MockProviderModelLister(result: .success(["gpt-5.2", "gpt-5.3-codex"]))
+        let provider = LLMProviderConfig.defaultChatGPTSubscription(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000701")!
+        )
+        credentialStore.credentialsByServiceName[provider.keychainServiceName] = ChatGPTSubscriptionCredential(
+            accessToken: "access-token",
+            accountID: "account-id",
+            expiresAt: nil,
+            sourceDescription: nil
+        )
+        let viewModel = makeViewModel(
+            chatGPTCredentialStore: credentialStore,
+            modelLister: modelLister
+        )
+        viewModel.providers = [provider]
+        viewModel.selectedProviderID = provider.id
+
+        await viewModel.refreshSelectedProviderModels()
+
+        XCTAssertEqual(viewModel.availableModelIDs(for: provider.id), ["gpt-5.2", "gpt-5.3-codex"])
+        XCTAssertEqual(modelLister.capturedProviders, [provider])
+        XCTAssertEqual(
+            modelLister.capturedCredentials,
+            [.chatGPTSubscription(accessToken: "access-token", accountID: "account-id")]
+        )
+        XCTAssertEqual(viewModel.statusMessage, "Loaded 2 models.")
+        XCTAssertFalse(viewModel.hasError)
+    }
+
+    func testExpiredChatGPTSubscriptionCredentialRequiresImportBeforeModelRefresh() async {
+        let credentialStore = InMemoryChatGPTCredentialStore()
+        let modelLister = MockProviderModelLister(result: .success(["gpt-5.2"]))
+        let provider = LLMProviderConfig.defaultChatGPTSubscription(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000702")!
+        )
+        credentialStore.credentialsByServiceName[provider.keychainServiceName] = ChatGPTSubscriptionCredential(
+            accessToken: "expired-access-token",
+            accountID: "expired-account-id",
+            expiresAt: Date(timeIntervalSince1970: 1),
+            sourceDescription: nil
+        )
+        let viewModel = makeViewModel(
+            chatGPTCredentialStore: credentialStore,
+            modelLister: modelLister
+        )
+        viewModel.providers = [provider]
+        viewModel.selectedProviderID = provider.id
+
+        XCTAssertNil(viewModel.selectedChatGPTAccountID)
+        XCTAssertEqual(viewModel.selectedProviderCredentialStatus.text, "Login Required")
+
+        await viewModel.refreshSelectedProviderModels()
+
+        XCTAssertEqual(modelLister.capturedProviders, [])
+        XCTAssertEqual(viewModel.statusMessage, "Import ChatGPT login before refreshing models.")
+        XCTAssertTrue(viewModel.hasError)
+    }
+
     private func makeViewModel(
         apiKeyStore: InMemoryProviderAPIKeyStore = InMemoryProviderAPIKeyStore(),
+        chatGPTCredentialStore: InMemoryChatGPTCredentialStore = InMemoryChatGPTCredentialStore(),
+        chatGPTCredentialImporter: any ChatGPTSubscriptionCredentialImporting = MockChatGPTCredentialImporter(
+            credential: ChatGPTSubscriptionCredential(
+                accessToken: "unused-access-token",
+                accountID: "unused-account-id",
+                expiresAt: nil,
+                sourceDescription: nil
+            )
+        ),
         modelLister: any LLMProviderModelListing = MockProviderModelLister(result: .success([]))
     ) -> ProviderSettingsViewModel {
         ProviderSettingsViewModel(
             store: LLMProviderStore(fileURL: temporaryDirectory.appendingPathComponent("providers.json")),
             apiKeyStore: apiKeyStore,
+            chatGPTCredentialStore: chatGPTCredentialStore,
+            chatGPTCredentialImporter: chatGPTCredentialImporter,
             modelLister: modelLister
         )
     }
@@ -171,10 +307,41 @@ private final class InMemoryProviderAPIKeyStore: LLMProviderAPIKeyStoring {
     }
 }
 
+private final class InMemoryChatGPTCredentialStore: ChatGPTSubscriptionCredentialStoring {
+    var credentialsByServiceName: [String: ChatGPTSubscriptionCredential] = [:]
+    var deletedServiceNames: [String] = []
+
+    func saveChatGPTSubscriptionCredential(
+        _ credential: ChatGPTSubscriptionCredential,
+        for provider: LLMProviderConfig
+    ) throws {
+        credentialsByServiceName[provider.keychainServiceName] = credential
+    }
+
+    func readChatGPTSubscriptionCredential(
+        for provider: LLMProviderConfig
+    ) throws -> ChatGPTSubscriptionCredential? {
+        credentialsByServiceName[provider.keychainServiceName]
+    }
+
+    func deleteChatGPTSubscriptionCredential(for provider: LLMProviderConfig) throws {
+        deletedServiceNames.append(provider.keychainServiceName)
+        credentialsByServiceName.removeValue(forKey: provider.keychainServiceName)
+    }
+}
+
+private struct MockChatGPTCredentialImporter: ChatGPTSubscriptionCredentialImporting {
+    var credential: ChatGPTSubscriptionCredential
+
+    func importCredential() throws -> ChatGPTSubscriptionCredential {
+        credential
+    }
+}
+
 private final class MockProviderModelLister: LLMProviderModelListing {
     private let result: Result<[String], Error>
     private(set) var capturedProviders: [LLMProviderConfig] = []
-    private(set) var capturedAPIKeys: [String?] = []
+    private(set) var capturedCredentials: [LLMCredential] = []
 
     init(result: Result<[String], Error>) {
         self.result = result
@@ -182,10 +349,10 @@ private final class MockProviderModelLister: LLMProviderModelListing {
 
     func listModels(
         provider: LLMProviderConfig,
-        apiKey: String?
+        credential: LLMCredential
     ) async throws -> [String] {
         capturedProviders.append(provider)
-        capturedAPIKeys.append(apiKey)
+        capturedCredentials.append(credential)
         return try result.get()
     }
 }

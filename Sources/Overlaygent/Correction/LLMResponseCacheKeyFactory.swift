@@ -32,7 +32,9 @@ struct LLMResponseCacheKeyFactory: LLMResponseCacheKeyMaking {
             bundle: LLMResponseCacheBundleFingerprint(bundle),
             provider: LLMResponseCacheProviderFingerprint(
                 id: provider.id.uuidString,
+                kind: provider.kind.rawValue,
                 baseURL: provider.baseURL.absoluteString,
+                wireAPI: provider.endpoint.wireAPI.rawValue,
                 defaultModel: provider.defaultModel,
                 temperature: provider.temperature,
                 maxTokens: provider.maxTokens
@@ -94,7 +96,9 @@ private struct LLMResponseCacheBundleFingerprint: Encodable {
 
 private struct LLMResponseCacheProviderFingerprint: Encodable {
     var id: String
+    var kind: String
     var baseURL: String
+    var wireAPI: String
     var defaultModel: String
     var temperature: Double
     var maxTokens: Int

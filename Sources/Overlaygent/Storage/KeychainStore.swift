@@ -1,15 +1,25 @@
 import Foundation
 import Security
 
-final class KeychainStore: LLMProviderAPIKeyStoring {
+final class KeychainStore: LLMProviderAPIKeyStoring, ChatGPTSubscriptionCredentialStoring {
     private static let apiKeyAccount = "api-key"
+    private static let chatGPTSubscriptionAccount = "chatgpt-subscription"
 
     private let itemStore: KeychainItemStoring
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
     private let cacheLock = NSLock()
     private var cachedAPIKeysByServiceName: [String: String] = [:]
+    private var cachedChatGPTCredentialsByServiceName: [String: ChatGPTSubscriptionCredential] = [:]
 
-    init(itemStore: KeychainItemStoring = SecurityKeychainItemStore()) {
+    init(
+        itemStore: KeychainItemStoring = SecurityKeychainItemStore(),
+        encoder: JSONEncoder = JSONEncoder(),
+        decoder: JSONDecoder = JSONDecoder()
+    ) {
         self.itemStore = itemStore
+        self.encoder = encoder
+        self.decoder = decoder
     }
 
     func saveAPIKey(_ apiKey: String, for provider: LLMProviderConfig) throws {
@@ -65,6 +75,59 @@ final class KeychainStore: LLMProviderAPIKeyStoring {
         removeCachedAPIKey(serviceName: serviceName)
     }
 
+    func saveChatGPTSubscriptionCredential(
+        _ credential: ChatGPTSubscriptionCredential,
+        for provider: LLMProviderConfig
+    ) throws {
+        let data: Data
+        do {
+            data = try encoder.encode(credential)
+        } catch {
+            throw KeychainStoreError.invalidCredentialEncoding
+        }
+
+        let serviceName = provider.keychainServiceName
+        try itemStore.saveGenericPassword(
+            data,
+            service: serviceName,
+            account: Self.chatGPTSubscriptionAccount
+        )
+        cacheChatGPTCredential(credential, serviceName: serviceName)
+    }
+
+    func readChatGPTSubscriptionCredential(
+        for provider: LLMProviderConfig
+    ) throws -> ChatGPTSubscriptionCredential? {
+        let serviceName = provider.keychainServiceName
+        if let cachedCredential = cachedChatGPTCredential(serviceName: serviceName) {
+            return cachedCredential
+        }
+
+        guard let data = try itemStore.readGenericPassword(
+            service: serviceName,
+            account: Self.chatGPTSubscriptionAccount
+        ) else {
+            return nil
+        }
+
+        do {
+            let credential = try decoder.decode(ChatGPTSubscriptionCredential.self, from: data)
+            cacheChatGPTCredential(credential, serviceName: serviceName)
+            return credential
+        } catch {
+            throw KeychainStoreError.invalidStoredCredentialData
+        }
+    }
+
+    func deleteChatGPTSubscriptionCredential(for provider: LLMProviderConfig) throws {
+        let serviceName = provider.keychainServiceName
+        try itemStore.deleteGenericPassword(
+            service: serviceName,
+            account: Self.chatGPTSubscriptionAccount
+        )
+        removeCachedChatGPTCredential(serviceName: serviceName)
+    }
+
     private func cachedAPIKey(serviceName: String) -> String? {
         cacheLock.lock()
         defer { cacheLock.unlock() }
@@ -81,6 +144,27 @@ final class KeychainStore: LLMProviderAPIKeyStoring {
         cacheLock.lock()
         defer { cacheLock.unlock() }
         cachedAPIKeysByServiceName[serviceName] = nil
+    }
+
+    private func cachedChatGPTCredential(serviceName: String) -> ChatGPTSubscriptionCredential? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return cachedChatGPTCredentialsByServiceName[serviceName]
+    }
+
+    private func cacheChatGPTCredential(
+        _ credential: ChatGPTSubscriptionCredential,
+        serviceName: String
+    ) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        cachedChatGPTCredentialsByServiceName[serviceName] = credential
+    }
+
+    private func removeCachedChatGPTCredential(serviceName: String) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        cachedChatGPTCredentialsByServiceName[serviceName] = nil
     }
 }
 
@@ -208,6 +292,8 @@ enum KeychainOperation: String {
 enum KeychainStoreError: Error, Equatable {
     case invalidAPIKeyEncoding
     case invalidStoredAPIKeyData
+    case invalidCredentialEncoding
+    case invalidStoredCredentialData
     case keychainOperationFailed(operation: KeychainOperation, status: OSStatus)
 }
 
@@ -218,6 +304,10 @@ extension KeychainStoreError: LocalizedError {
             return "The API key could not be encoded for Keychain storage."
         case .invalidStoredAPIKeyData:
             return "The stored API key could not be decoded from Keychain data."
+        case .invalidCredentialEncoding:
+            return "The provider credential could not be encoded for Keychain storage."
+        case .invalidStoredCredentialData:
+            return "The stored provider credential could not be decoded from Keychain data."
         case let .keychainOperationFailed(operation, status):
             return "Keychain \(operation.rawValue) failed with status \(status)."
         }

@@ -41,7 +41,8 @@ private struct DashboardSectionDetailView: View {
         case .llmProvider:
             ProviderSettingsView(
                 store: dependencies.llmProviderStore,
-                apiKeyStore: dependencies.apiKeyStore
+                apiKeyStore: dependencies.apiKeyStore,
+                chatGPTCredentialStore: dependencies.chatGPTCredentialStore
             )
         case .agents:
             AgentListView(

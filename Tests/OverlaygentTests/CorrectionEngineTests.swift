@@ -67,7 +67,7 @@ final class CorrectionEngineTests: XCTestCase {
 
         let capturedCall = try XCTUnwrap(llmProvider.capturedCalls.first)
         XCTAssertEqual(capturedCall.provider, providerConfig)
-        XCTAssertEqual(capturedCall.apiKey, "sk-test-primary")
+        XCTAssertEqual(capturedCall.credential, .apiKey("sk-test-primary"))
         XCTAssertEqual(capturedCall.bundle.providerID, providerID)
         XCTAssertEqual(capturedCall.bundle.resolvedModel, "gpt-agent-model")
     }
@@ -168,6 +168,23 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(results.first?.result?.fullRewrite, "Fresh rewrite.")
         XCTAssertEqual(responseCache.storedResponses.map(\.rawResponse), [rawResponse])
         XCTAssertEqual(responseCache.storedResponses.first?.cacheKey.isEmpty, false)
+    }
+
+    func testRunReturnsLoginRequiredForChatGPTSubscriptionWithoutCredential() async throws {
+        let providerID = UUID(uuidString: "00000000-0000-0000-0000-000000000634")!
+        let provider = LLMProviderConfig.defaultChatGPTSubscription(id: providerID)
+        let llmProvider = MockLLMProvider(responsesByAgentID: [:])
+        let engine = correctionEngine(
+            providers: [provider],
+            apiKeys: [:],
+            llmProvider: llmProvider
+        )
+        let request = runRequest(activeAgents: [agent(idSuffix: 34, providerID: providerID)])
+
+        let results = try await engine.run(request)
+
+        XCTAssertEqual(results.first?.failure, .loginRequired(providerID: providerID))
+        XCTAssertTrue(llmProvider.capturedCalls.isEmpty)
     }
 
     func testRunKeepsProcessingAfterPerAgentFailures() async throws {
@@ -410,7 +427,7 @@ private final class MockLLMProvider: LLMProvider {
     struct CapturedCall {
         var bundle: AgentMessageBundle
         var provider: LLMProviderConfig
-        var apiKey: String?
+        var credential: LLMCredential
     }
 
     private let responsesByAgentID: [UUID: Result<String, Error>]
@@ -423,9 +440,9 @@ private final class MockLLMProvider: LLMProvider {
     func complete(
         bundle: AgentMessageBundle,
         provider: LLMProviderConfig,
-        apiKey: String?
+        credential: LLMCredential
     ) async throws -> String {
-        capturedCalls.append(CapturedCall(bundle: bundle, provider: provider, apiKey: apiKey))
+        capturedCalls.append(CapturedCall(bundle: bundle, provider: provider, credential: credential))
         guard let response = responsesByAgentID[bundle.agentID] else {
             throw MockProviderError.missingResponse
         }

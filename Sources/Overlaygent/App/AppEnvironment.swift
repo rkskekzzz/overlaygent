@@ -32,7 +32,8 @@ struct AppEnvironment {
             agentProfileStore: agentProfileStore,
             llmProviderStore: llmProviderStore,
             orchestratorSettingsStore: orchestratorSettingsStore,
-            apiKeyStore: apiKeyStore
+            apiKeyStore: apiKeyStore,
+            chatGPTCredentialStore: apiKeyStore
         )
         let logger = SafeLogger.default
         let textSession = AccessibilityPreparingInputCapture(
@@ -54,7 +55,8 @@ struct AppEnvironment {
         let correctionEngine = CorrectionEngine(
             providerConfigLoader: SeededLLMProviderConfigLoader(providerStore: llmProviderStore),
             apiKeyStore: apiKeyStore,
-            llmProvider: OpenAICompatibleProvider(),
+            chatGPTCredentialStore: apiKeyStore,
+            llmProvider: LLMProviderClientRouter(),
             responseCache: NoopLLMResponseCache()
         )
         let runActiveAgentsCoordinator = RunActiveAgentsCoordinator(

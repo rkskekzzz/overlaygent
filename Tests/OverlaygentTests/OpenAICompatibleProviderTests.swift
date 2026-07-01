@@ -31,7 +31,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         let content = try await provider.complete(
             bundle: bundle,
             provider: config,
-            apiKey: apiKey
+            credential: .apiKey(apiKey)
         )
 
         XCTAssertEqual(content, "Corrected text.")
@@ -90,7 +90,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         _ = try await provider.complete(
             bundle: messageBundle(resolvedModel: nil),
             provider: config,
-            apiKey: "sk-test-secret"
+            credential: .apiKey("sk-test-secret")
         )
 
         let request = try XCTUnwrap(httpClient.capturedRequests.first)
@@ -114,7 +114,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         _ = try await provider.complete(
             bundle: messageBundle(),
             provider: config,
-            apiKey: "sk-test-secret"
+            credential: .apiKey("sk-test-secret")
         )
 
         let request = try XCTUnwrap(httpClient.capturedRequests.first)
@@ -137,7 +137,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
             timeoutSeconds: 8
         )
 
-        let models = try await modelLister.listModels(provider: config, apiKey: apiKey)
+        let models = try await modelLister.listModels(provider: config, credential: .apiKey(apiKey))
 
         XCTAssertEqual(models, ["gpt-4.1-mini", "gpt-5.2"])
         let request = try XCTUnwrap(httpClient.capturedRequests.first)
@@ -164,7 +164,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         _ = try await provider.complete(
             bundle: messageBundle(),
             provider: config,
-            apiKey: "sk-test-secret"
+            credential: .apiKey("sk-test-secret")
         )
 
         XCTAssertEqual(
@@ -173,7 +173,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         )
     }
 
-    func testCompleteRejectsMissingAPIKeyBeforeHTTP() async {
+    func testCompleteRejectsMissingCredentialBeforeHTTP() async {
         let httpClient = MockLLMProviderHTTPClient(
             result: .success((
                 responseData(content: "Should not be used"),
@@ -182,11 +182,11 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         )
         let provider = OpenAICompatibleProvider(httpClient: httpClient)
 
-        await assertThrowsLLMProviderError(.missingAPIKey) {
+        await assertThrowsLLMProviderError(.missingCredential) {
             _ = try await provider.complete(
                 bundle: messageBundle(),
                 provider: providerConfig(),
-                apiKey: "  "
+                credential: .apiKey("  ")
             )
         }
         XCTAssertEqual(httpClient.capturedRequests.count, 0)
@@ -206,7 +206,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
             _ = try await provider.complete(
                 bundle: messageBundle(),
                 provider: providerConfig(),
-                apiKey: apiKey
+                credential: .apiKey(apiKey)
             )
             XCTFail("Expected provider to reject non-success HTTP status.")
         } catch let error as LLMProviderError {
@@ -232,7 +232,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
             _ = try await provider.complete(
                 bundle: messageBundle(),
                 provider: providerConfig(),
-                apiKey: apiKey
+                credential: .apiKey(apiKey)
             )
             XCTFail("Expected provider to reject non-success HTTP status.")
         } catch let error as LLMProviderError {
@@ -260,7 +260,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
             _ = try await provider.complete(
                 bundle: messageBundle(),
                 provider: providerConfig(),
-                apiKey: "sk-test-secret"
+                credential: .apiKey("sk-test-secret")
             )
         }
     }
@@ -278,7 +278,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
             _ = try await provider.complete(
                 bundle: messageBundle(),
                 provider: providerConfig(),
-                apiKey: "sk-test-secret"
+                credential: .apiKey("sk-test-secret")
             )
         }
     }
@@ -296,7 +296,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
             _ = try await provider.complete(
                 bundle: messageBundle(),
                 provider: providerConfig(),
-                apiKey: "sk-test-secret"
+                credential: .apiKey("sk-test-secret")
             )
         }
     }
@@ -314,7 +314,7 @@ final class OpenAICompatibleProviderTests: XCTestCase {
             _ = try await provider.complete(
                 bundle: messageBundle(),
                 provider: providerConfig(),
-                apiKey: "sk-test-secret"
+                credential: .apiKey("sk-test-secret")
             )
         }
     }

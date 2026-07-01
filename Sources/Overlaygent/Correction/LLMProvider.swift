@@ -4,8 +4,26 @@ protocol LLMProvider {
     func complete(
         bundle: AgentMessageBundle,
         provider: LLMProviderConfig,
-        apiKey: String?
+        credential: LLMCredential
     ) async throws -> String
+}
+
+enum LLMCredential: Equatable {
+    case apiKey(String)
+    case chatGPTSubscription(accessToken: String, accountID: String)
+    case bearerToken(String)
+    case none
+
+    var redactionRules: [String] {
+        switch self {
+        case .apiKey(let value), .bearerToken(let value):
+            return value.isEmpty ? [] : [value]
+        case let .chatGPTSubscription(accessToken, accountID):
+            return [accessToken, accountID].filter { $0.isEmpty == false }
+        case .none:
+            return []
+        }
+    }
 }
 
 protocol LLMProviderHTTPClient {
@@ -31,7 +49,10 @@ struct URLSessionLLMProviderHTTPClient: LLMProviderHTTPClient {
 
 enum LLMProviderError: Error, Equatable, LocalizedError, CustomStringConvertible {
     case missingAPIKey
+    case missingCredential
     case missingModel
+    case unsupportedProvider
+    case unsupportedCredential
     case invalidEndpoint(String)
     case invalidRequestBody
     case invalidHTTPResponse
@@ -45,8 +66,14 @@ enum LLMProviderError: Error, Equatable, LocalizedError, CustomStringConvertible
         switch self {
         case .missingAPIKey:
             return "LLM provider API key is missing."
+        case .missingCredential:
+            return "LLM provider credential is missing."
         case .missingModel:
             return "LLM provider model is missing."
+        case .unsupportedProvider:
+            return "LLM provider type is not supported by this client."
+        case .unsupportedCredential:
+            return "LLM provider credential type is not supported by this client."
         case .invalidEndpoint(let baseURL):
             return "LLM provider base URL is invalid: \(baseURL)"
         case .invalidRequestBody:

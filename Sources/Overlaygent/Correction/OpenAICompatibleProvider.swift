@@ -18,11 +18,11 @@ struct OpenAICompatibleProvider: LLMProvider {
     func complete(
         bundle: AgentMessageBundle,
         provider: LLMProviderConfig,
-        apiKey: String?
+        credential: LLMCredential
     ) async throws -> String {
-        let normalizedAPIKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard normalizedAPIKey.isEmpty == false else {
-            throw LLMProviderError.missingAPIKey
+        let bearerToken = try bearerToken(from: credential)
+        guard bearerToken.isEmpty == false else {
+            throw LLMProviderError.missingCredential
         }
 
         let model = normalizedModel(for: bundle, provider: provider)
@@ -34,7 +34,7 @@ struct OpenAICompatibleProvider: LLMProvider {
             bundle: bundle,
             provider: provider,
             model: model,
-            apiKey: normalizedAPIKey
+            bearerToken: bearerToken
         )
 
         let data: Data
@@ -50,7 +50,7 @@ struct OpenAICompatibleProvider: LLMProvider {
         guard (200...299).contains(response.statusCode) else {
             throw LLMProviderError.httpStatus(
                 response.statusCode,
-                message: safeErrorMessage(from: data, redacting: normalizedAPIKey)
+                message: safeErrorMessage(from: data, redactionRules: credential.redactionRules)
             )
         }
 
@@ -76,7 +76,7 @@ struct OpenAICompatibleProvider: LLMProvider {
         bundle: AgentMessageBundle,
         provider: LLMProviderConfig,
         model: String,
-        apiKey: String
+        bearerToken: String
     ) throws -> URLRequest {
         let endpointURL = try chatCompletionsURL(for: provider.baseURL)
         let payload = OpenAIChatCompletionRequest(
@@ -105,9 +105,18 @@ struct OpenAICompatibleProvider: LLMProvider {
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
 
         return request
+    }
+
+    private func bearerToken(from credential: LLMCredential) throws -> String {
+        switch credential {
+        case .apiKey(let apiKey), .bearerToken(let apiKey):
+            return apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .chatGPTSubscription, .none:
+            throw LLMProviderError.unsupportedCredential
+        }
     }
 
     private func chatCompletionsURL(for baseURL: URL) throws -> URL {
@@ -145,7 +154,7 @@ struct OpenAICompatibleProvider: LLMProvider {
         return provider.defaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func safeErrorMessage(from data: Data, redacting apiKey: String) -> String? {
+    private func safeErrorMessage(from data: Data, redactionRules: [String]) -> String? {
         guard data.isEmpty == false else {
             return nil
         }
@@ -155,7 +164,7 @@ struct OpenAICompatibleProvider: LLMProvider {
             return nil
         }
 
-        let redactedMessage = SafeLogger.redacted(decodedMessage, redactionRules: [apiKey])
+        let redactedMessage = SafeLogger.redacted(decodedMessage, redactionRules: redactionRules)
         let collapsedMessage = redactedMessage
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { $0.isEmpty == false }
@@ -187,7 +196,7 @@ private struct OpenAIChatCompletionRequest: Encodable {
     }
 }
 
-private struct OpenAIResponseFormat: Encodable {
+struct OpenAIResponseFormat: Encodable {
     struct JSONSchemaEnvelope: Encodable {
         var name: String
         var strict: Bool
@@ -212,7 +221,7 @@ private struct OpenAIResponseFormat: Encodable {
     }
 }
 
-private struct CorrectionResultJSONSchema: Encodable {
+struct CorrectionResultJSONSchema: Encodable {
     struct RootProperties: Encodable {
         var summary = NullableStringSchema()
         var edits = EditArraySchema()
@@ -269,7 +278,7 @@ private struct OpenAIChatCompletionResponse: Decodable {
     var choices: [Choice]
 }
 
-private struct OpenAIErrorResponse: Decodable {
+struct OpenAIErrorResponse: Decodable {
     struct ErrorDetail: Decodable {
         var message: String?
     }
